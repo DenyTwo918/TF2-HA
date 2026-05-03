@@ -31,7 +31,7 @@ const ACCOUNT_ROLES = Object.freeze({
   buffer: 'Buffer',
   disabled: 'Disabled'
 });
-// 5.13.38: bounded log render.  Earlier builds dumped the full JSON of every
+// 5.13.39: bounded log render.  Earlier builds dumped the full JSON of every
 // API response into the #logs <pre>, which on large payloads (diagnostic
 // bundles, full publish wizard status, market mirror) ballooned browser RAM
 // and locked the tab.  We now cap output at 64 KB; the diagnostic bundle
@@ -53,7 +53,7 @@ function updateSimpleUiButton(){const b=document.getElementById('toggleSimpleUi'
 (function initSimpleUi(){try{const forcedKey='tf2_hub_simple_for_5_12_79';if(localStorage.getItem(forcedKey)!=='done'){document.body.classList.add('simple-ui');localStorage.setItem('tf2_hub_ui_mode','simple');localStorage.setItem(forcedKey,'done');}else if(localStorage.getItem('tf2_hub_ui_mode')!=='advanced')document.body.classList.add('simple-ui');setTimeout(updateSimpleUiButton,0);}catch{document.body.classList.add('simple-ui');}})();
 function setSda(value){qs('#sdaOutput').textContent=typeof value==='string'?value:JSON.stringify(value,null,2);}
 function saveJsonDownload(fileName,value){try{const blob=new Blob([JSON.stringify(value,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=fileName||"tf2-hub-diagnostic.json";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);return true;}catch(error){setLog({ok:false,error:'Browser download failed',detail:String(error&&error.message?error.message:error)});return false;}}
-async function downloadCachedDiagnosticFallback(reason){const fallback={ok:false,version:'5.13.38',title:'Client-side diagnostic download fallback',generated_at:new Date().toISOString(),source:'browser_fallback',error:String(reason&&reason.message?reason.message:reason||'Unknown diagnostic download error'),safety_note:'Client fallback only. No live trade, Steam confirmation or Backpack.tf write was executed.'};try{const cached=await api('/api/diagnostics/bundle').catch(()=>null);if(cached&&typeof cached==='object'){cached.client_download_fallback_reason=fallback.error;saveJsonDownload(cached.file_name||('tf2-hub-diagnostic-cached-'+(cached.version||'bundle')+'.json'),cached);return cached;}}catch{}saveJsonDownload('tf2-hub-diagnostic-client-fallback.json',fallback);return fallback;}
+async function downloadCachedDiagnosticFallback(reason){const fallback={ok:false,version:'5.13.39',title:'Client-side diagnostic download fallback',generated_at:new Date().toISOString(),source:'browser_fallback',error:String(reason&&reason.message?reason.message:reason||'Unknown diagnostic download error'),safety_note:'Client fallback only. No live trade, Steam confirmation or Backpack.tf write was executed.'};try{const cached=await api('/api/diagnostics/bundle').catch(()=>null);if(cached&&typeof cached==='object'){cached.client_download_fallback_reason=fallback.error;saveJsonDownload(cached.file_name||('tf2-hub-diagnostic-cached-'+(cached.version||'bundle')+'.json'),cached);return cached;}}catch{}saveJsonDownload('tf2-hub-diagnostic-client-fallback.json',fallback);return fallback;}
 function renderDiagnosticBundle(data){
   const el=qs("#diagnosticBundleStatus");if(!el)return;
   if(!data){el.innerHTML='<p class="muted">No diagnostic bundle yet.</p>';return;}
@@ -128,31 +128,44 @@ function renderSetup(data){
 function renderCredentials(data){
   const el=qs('#credentialStatus'); if(!el)return;
   if(!data||data.ok===false){el.innerHTML=`<p class="muted">${esc(data?.error||'Credential status unavailable.')}</p>`;return;}
-  // 5.13.38: the backend returns account_status; older UI code looked only at data.accounts,
-  // so saved credentials were displayed as missing even though the vault was written correctly.
   const accounts=Array.isArray(data.account_status)?data.account_status:(Array.isArray(data.accounts)?data.accounts:[]);
   const main=data.main_account||accounts.find(a=>String(a.id||'main')==='main'||String(a.role||'')==='main')||accounts[0]||{};
+  const providerHealth=data.provider_health||main.provider_health||{};
+  const backpackHealth=providerHealth.backpack_tf||{};
+  const inventoryHealth=providerHealth.inventory||{};
+  const checks=Array.isArray(providerHealth.checks)?providerHealth.checks:[];
   const select=qs('#credentialAccountId');
-  if(select){
-    select.innerHTML='<option value="main">Main account</option>';
-    select.value='main';
-  }
+  if(select){ select.innerHTML='<option value="main">Main account</option>'; select.value='main'; }
   const steamSaved=Boolean(main.steam_web_api_key_saved||main.steam_api_key_saved||main.steam_api);
-  const backpackSaved=Boolean(main.backpack_tf_token_saved||main.backpack_tf_access_token_saved||main.backpack_tf||main.backpack_tf_api_key_saved);
+  const backpackSaved=Boolean(main.backpack_tf_token_saved||main.backpack_tf_access_token_saved||main.backpack_tf||main.backpack_tf_api_key_saved||backpackHealth.access_token_saved||backpackHealth.api_key_saved);
   const steamIdSaved=Boolean(main.steam_id64_saved||main.steam_id64);
   const steamId=main.steam_id64_short||main.steam_id64||(steamIdSaved?'saved':'missing');
-  const readiness=(main.readiness||data.readiness||'').toString();
-  const ready=Boolean(steamIdSaved&&steamSaved&&backpackSaved);
+  const credentialsReady=Boolean(steamIdSaved&&steamSaved&&backpackSaved);
+  const providerKnown=Boolean(providerHealth.readiness||checks.length||providerHealth.recommended_next_action);
+  const providerReady=providerHealth.overall_ready===true;
+  const ready=credentialsReady&&(!providerKnown||providerReady);
+  const readiness=(providerHealth.readiness||main.readiness||data.readiness||'').toString();
+  const tokenState=backpackHealth.token_state||main.backpack_token_state||(backpackHealth.token_valid===true?'ok':backpackHealth.token_valid===false?'invalid':'unknown');
+  const tokenPillClass=String(tokenState)==='ok'?'ok':(String(tokenState).includes('invalid')?'bad':'warn');
+  const priceState=backpackHealth.price_state||main.backpack_price_state||'unknown';
+  const pricePillClass=String(priceState).includes('ready')?'ok':'warn';
+  const providerRows=checks.length?checks.map(x=>`<div class="miniRow"><b>${esc(x.label||x.id)}</b><small>${x.ready?'ready':'needs attention'} · ${esc(x.state||'')}${x.count!=null?` · ${esc(x.count)}`:''}${x.detail?` · ${esc(typeof x.detail==='string'?x.detail:JSON.stringify(x.detail))}`:''}</small></div>`).join(''):'';
   el.innerHTML=`<div class="mainAccountSummary ${ready?'ready':'needs'}">
-    <div class="accountCardTop"><b>${esc(main.label||'Main account')}</b>${pill(ready?'ready':'needs setup',ready?'ok':'warn')}</div>
+    <div class="accountCardTop"><b>${esc(main.label||'Main account')}</b>${pill(ready?'ready':'needs attention',ready?'ok':'warn')}</div>
     <div class="metrics compactMetrics accountSimpleMetrics">
       ${metric('SteamID64',steamId)}
       ${metric('Steam API key',steamSaved?'saved':'missing')}
-      ${metric('Backpack token',backpackSaved?'saved':'missing')}
+      ${metric('Backpack saved',backpackSaved?'saved':'missing')}
       ${metric('Live scope','Main only')}
+      ${metric('Backpack token valid',tokenState)}
+      ${metric('Backpack prices',priceState)}
+      ${metric('Inventory',`${Number(inventoryHealth.items||0)} items`)}
+      ${metric('Priced',`${Number(inventoryHealth.priced||0)} priced`)}
     </div>
-    <p class="muted">To switch account: paste the new SteamID64, Steam Web API key and Backpack.tf token above, then click <b>Save main account</b>. This card reads only the canonical vault status.</p>
-    ${readiness?`<small class="muted">Readiness: ${esc(readiness)}</small>`:''}
+    <p class="muted">Credentials saved only means they are stored. Provider health shows whether Backpack.tf and pricing actually work.</p>
+    <p class="muted">${esc(providerHealth.recommended_next_action||'To switch account: paste the new SteamID64, Steam Web API key and Backpack.tf token/API key, then click Save main account.')}</p>
+    ${readiness?`<small class="muted">Readiness: ${esc(readiness)} ${pill(tokenState,tokenPillClass)} ${pill(priceState,pricePillClass)}</small>`:''}
+    ${providerRows?`<details class="softDetails"><summary>Provider health checks</summary>${providerRows}</details>`:''}
     <div class="miniRow mainSaveDebug"><b>Last save result</b><small>${esc(lastMainAccountSaveResult?((lastMainAccountSaveResult.verified?'verified':'not verified')+' · '+lastMainAccountSaveResult.duration_ms+' ms · source '+(lastMainAccountSaveResult.vault_source||data.source||'canonical_vault')):'not run yet')}</small><button id="debugMainAccountStatus">Debug status</button></div>
   </div>`;
   const debugBtn=qs('#debugMainAccountStatus');
@@ -499,7 +512,7 @@ function renderListingsPlanMode(data){
 }
 
 
-// ── 5.13.38 – Live Dashboard (lite poll + adaptive backoff) ───────────
+// ── 5.13.39 – Live Dashboard (lite poll + adaptive backoff) ───────────
 // Poll the cheap /status/lite endpoint by default.  Pull the heavy /status
 // payload only when the lite signature actually changes, when a panel that
 // needs full data is open, or on a slow background interval.  Back off when
@@ -658,7 +671,7 @@ function startLiveDashboardPolling(){
 
 async function refreshSda(){try{const data=await api('/api/sda/status');renderSdaBridge(data);return data;}catch(e){const data={ok:false,error:e.message};renderSdaBridge(data);return data;}}
 async function refresh(){
-  // 5.13.38: hydrated fast dashboard.  The first paint must not show confusing
+  // 5.13.39: hydrated fast dashboard.  The first paint must not show confusing
   // "skipped during fast dashboard load" cards.  Load the small status endpoints
   // first, then hydrate the production dashboard and credentials with longer
   // guarded timeouts.  Manual workflow runs stay behind their own buttons.
@@ -690,7 +703,7 @@ async function refresh(){
     safe('/api/opportunities','opportunities snapshot',12000).then(renderOpportunities)
   ]).catch(()=>{});
   scheduleLiveDashboardRefresh(250);
-  setLog({ok:true,version:(versionAudit&&versionAudit.expected)||'5.13.38',hydrated_dashboard_load:true,message:'Dashboard loaded. Live status will keep hydrating in the background.'});
+  setLog({ok:true,version:(versionAudit&&versionAudit.expected)||'5.13.39',hydrated_dashboard_load:true,message:'Dashboard loaded. Live status will keep hydrating in the background.'});
 }
 async function loadJsonTo(selector,path,options){const data=await api(path,options);qs(selector).textContent=JSON.stringify(data,null,2);return data;}
 async function runReview(){qs('#review').disabled=true;try{await loadJsonTo('#logs','/api/review/run',{method:'POST',body:'{}'});await api('/api/trading-core/build',{method:'POST',body:'{}'});await refresh();}catch(e){setLog(e.body||e.message);}finally{qs('#review').disabled=false;}}
@@ -699,7 +712,7 @@ async function buildScanner(){try{const data=await api('/api/market-scanner/buil
 async function markOffer(tradeofferid,status){await api('/api/offers/mark',{method:'POST',body:JSON.stringify({tradeofferid,status})});await refresh();}
 async function confirmRecommendedViaSda(){try{const ids=latestDecisions.filter(d=>d.decision==='accept_recommended'&&d.reviewed_status!=='ignored').map(d=>String(d.tradeofferid));if(!ids.length){setSda('No accept_recommended offers found. Run trade review first.');return;}const data=await api('/api/sda/confirm',{method:'POST',body:JSON.stringify({offer_ids:ids})});setSda(data);await refresh();}catch(e){setSda(e.body||e.message);}}
 async function saveSelectedCredentials(extra={}){
-  // 5.13.38: verified save.  The UI only clears secret fields after the backend
+  // 5.13.39: verified save.  The UI only clears secret fields after the backend
   // confirms that the canonical Main credential vault was written and re-read.
   const accountId='main';
   const selectedRole='main';
@@ -960,7 +973,7 @@ function renderLocalWorkflow(data){
 function renderPublishWizard(data){
   const el=document.getElementById('publishWizard');if(!el)return;
   if(!data||data.error){el.innerHTML=`<p class="muted">${esc2(data&&data.error||'No production dashboard data yet.')}</p>`;return;}
-  if(data.version&&data.ok&&data.steps===undefined&&data.candidate_draft_id===undefined&&data.classifieds_maintainer===undefined){el.innerHTML=`<p class="badText"><b>Production dashboard data mapping mismatch.</b> Refresh response was not /api/publish-wizard/status. Update to 5.13.38 or reload with Ctrl+F5.</p><pre>${esc2(JSON.stringify(data,null,2).slice(0,1000))}</pre>`;return;}
+  if(data.version&&data.ok&&data.steps===undefined&&data.candidate_draft_id===undefined&&data.classifieds_maintainer===undefined){el.innerHTML=`<p class="badText"><b>Production dashboard data mapping mismatch.</b> Refresh response was not /api/publish-wizard/status. Update to 5.13.39 or reload with Ctrl+F5.</p><pre>${esc2(JSON.stringify(data,null,2).slice(0,1000))}</pre>`;return;}
   const maint=data.classifieds_maintainer||{};
   const autoSell=data.auto_sell_relister||{};
   const manualOwnedSell=data.manual_owned_sell_detector||{};
