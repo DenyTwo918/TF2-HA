@@ -1,0 +1,22 @@
+FROM ghcr.io/home-assistant/i386-base:latest
+
+ARG BUILD_VERSION=5.13.36
+ARG BUILD_ARCH=i386
+
+LABEL io.hass.name="TF2 Trading Hub" \
+      io.hass.description="Backpack.tf-first TF2 trading cockpit with optional SDA Bridge integration" \
+      io.hass.version="${BUILD_VERSION}" \
+      io.hass.type="app" \
+      io.hass.arch="i386" \
+      org.opencontainers.image.source="https://github.com/DenyTwo918/TF2-HA"
+
+RUN apk add --no-cache nodejs
+WORKDIR /app
+COPY dist ./dist
+COPY public ./public
+COPY package.json ./package.json
+COPY config.yaml ./config.yaml
+COPY run.sh /run.sh
+RUN chmod +x /run.sh
+EXPOSE 8099
+CMD ["/run.sh"]

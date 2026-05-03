@@ -1,0 +1,12 @@
+{
+  "name": "tf2-trading-hub-addon",
+  "version": "5.13.36",
+  "private": true,
+  "main": "dist/server.js",
+  "scripts": {
+    "check": "node --check dist/server.js && node --check dist/index.js && node --check public/app.js",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {},
+  "description": "TF2 Trading Hub production declutter with isolated Main account save and runtime event logging."
+}
