@@ -1,0 +1,137 @@
+{
+  "ok": true,
+  "running": false,
+  "last_run_at": "2026-05-03T19:05:28.970Z",
+  "last_result": {
+    "ok": true,
+    "version": "5.13.32",
+    "reason": "scheduled_pipeline",
+    "started_at": "2026-05-03T19:05:03.585Z",
+    "stages": [
+      {
+        "stage": "provider_sync",
+        "ok": false,
+        "listings": 0,
+        "prices": 0,
+        "cache_stage": "sync_failed",
+        "error": null
+      },
+      {
+        "stage": "inventory_sync",
+        "ok": false,
+        "items": 0,
+        "priced": 0,
+        "value_ref": 0,
+        "error": "SteamID64 is missing. Save the main account SteamID64 in Accounts first."
+      },
+      {
+        "stage": "market_scanner",
+        "ok": false,
+        "candidates": 0,
+        "fallback": false,
+        "error": "No Backpack.tf price schema available. Run Sync Backpack.tf first."
+      },
+      {
+        "stage": "trade_review",
+        "ok": false,
+        "decisions": 0,
+        "error": "Missing Steam Web API key. Add it in add-on options."
+      },
+      {
+        "stage": "trading_core",
+        "ok": true,
+        "readiness": 22,
+        "candidates": 0,
+        "decisions": 0
+      },
+      {
+        "stage": "trading_brain",
+        "ok": true,
+        "recommendations": 5,
+        "warnings": 3,
+        "blocked": 1
+      },
+      {
+        "stage": "actionable_plan",
+        "ok": true,
+        "actions": 0,
+        "watchlist": 0,
+        "protected": 0
+      },
+      {
+        "stage": "execution_queue",
+        "ok": true,
+        "entries": 0,
+        "live": false
+      }
+    ],
+    "completed_at": "2026-05-03T19:05:28.970Z"
+  },
+  "runs": [
+    {
+      "ok": true,
+      "version": "5.13.32",
+      "reason": "scheduled_pipeline",
+      "started_at": "2026-05-03T19:05:03.585Z",
+      "stages": [
+        {
+          "stage": "provider_sync",
+          "ok": false,
+          "listings": 0,
+          "prices": 0,
+          "cache_stage": "sync_failed",
+          "error": null
+        },
+        {
+          "stage": "inventory_sync",
+          "ok": false,
+          "items": 0,
+          "priced": 0,
+          "value_ref": 0,
+          "error": "SteamID64 is missing. Save the main account SteamID64 in Accounts first."
+        },
+        {
+          "stage": "market_scanner",
+          "ok": false,
+          "candidates": 0,
+          "fallback": false,
+          "error": "No Backpack.tf price schema available. Run Sync Backpack.tf first."
+        },
+        {
+          "stage": "trade_review",
+          "ok": false,
+          "decisions": 0,
+          "error": "Missing Steam Web API key. Add it in add-on options."
+        },
+        {
+          "stage": "trading_core",
+          "ok": true,
+          "readiness": 22,
+          "candidates": 0,
+          "decisions": 0
+        },
+        {
+          "stage": "trading_brain",
+          "ok": true,
+          "recommendations": 5,
+          "warnings": 3,
+          "blocked": 1
+        },
+        {
+          "stage": "actionable_plan",
+          "ok": true,
+          "actions": 0,
+          "watchlist": 0,
+          "protected": 0
+        },
+        {
+          "stage": "execution_queue",
+          "ok": true,
+          "entries": 0,
+          "live": false
+        }
+      ],
+      "completed_at": "2026-05-03T19:05:28.970Z"
+    }
+  ]
+}

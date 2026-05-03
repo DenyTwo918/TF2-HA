@@ -1,0 +1,49 @@
+{
+  "ok": true,
+  "version": "5.13.32",
+  "title": "Guarded Publish Dry Run",
+  "built_at": "2026-05-03T19:05:28.881Z",
+  "source": "scheduled_pipeline",
+  "mode": "observe",
+  "summary": {
+    "watchlist_seen": 0,
+    "queue_ready_targets": 0,
+    "sell_plans": 0,
+    "protected_currency_items": 0,
+    "trade_review_actions": 0,
+    "live_actions_enabled": false
+  },
+  "planning_value": {
+    "planning_value_ref": 0,
+    "inventory_value_ref": 0,
+    "pure_ref": 0,
+    "key_ref_estimate": 77
+  },
+  "pure": {
+    "key_count": 0,
+    "pure_items": [],
+    "estimated_pure_ref": 0,
+    "protect_last_key": true,
+    "note": "Last/only key is treated as trading currency and is protected from automatic sell listing plans."
+  },
+  "actions": [],
+  "watchlist": [],
+  "protected_items": [],
+  "next_actions": [
+    {
+      "id": "keep_observing",
+      "label": "Keep observe mode running",
+      "action": "none",
+      "safe": true,
+      "live": false,
+      "count": 0
+    }
+  ],
+  "safety": {
+    "live_trade_accepts": false,
+    "live_backpack_writes": false,
+    "sda_confirmations": false,
+    "queue_only": true,
+    "note": "This plan only creates reviewable actions. It does not accept trades, confirm Steam actions or write Backpack.tf listings."
+  }
+}

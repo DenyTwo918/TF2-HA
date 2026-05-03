@@ -5,4 +5,4 @@
 - Writes `/data/tf2-hub-credential-vault.last-good.json` backup when credentials are present.
 - Recovers from empty vault files using options/legacy/last-good credential sources.
 - UI shows `Saving…`, does not clear secret inputs until save verification succeeds, and logs `save_verified`.
-- Keeps safe boot behavior: no Steam auto-accept, no Steam Guard confirmation, no automatic trade offer sending.
+- Keeps manual safety behavior: no Steam auto-accept, no Steam Guard confirmation, no automatic trade offer sending.

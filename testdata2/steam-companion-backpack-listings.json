@@ -1,0 +1,44 @@
+{
+  "ok": false,
+  "stage": "sync_failed",
+  "updated_at": "2026-05-03T19:05:28.571Z",
+  "source": "ui_credential_vault",
+  "account_scope": "main",
+  "token_check": {
+    "ok": false,
+    "skipped": false,
+    "status": null,
+    "error": "fetch failed"
+  },
+  "listings_count": 0,
+  "listings_summary": {
+    "total": 0,
+    "buy": 0,
+    "sell": 0,
+    "other": 0
+  },
+  "listings": [],
+  "prices_ok": false,
+  "prices_count": 0,
+  "prices_sample": [],
+  "attempts": [
+    {
+      "label": "x_auth_token",
+      "url": "https://backpack.tf/api/v2/classifieds/listings?limit=100",
+      "ok": false,
+      "status": 0,
+      "listings": 0,
+      "error": "fetch failed",
+      "body_keys": []
+    },
+    {
+      "label": "IGetPrices/v4",
+      "skipped": true,
+      "error": "Backpack.tf API key missing. Price schema sync skipped."
+    }
+  ],
+  "errors": [
+    "fetch failed"
+  ],
+  "guidance": "Backpack.tf sync failed. Check token/API key and provider attempts below."
+}

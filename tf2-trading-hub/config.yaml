@@ -1,7 +1,7 @@
 slug: tf2_trading_hub
 name: TF2 Trading Hub
-version: "5.13.36"
-description: HA visibility rebuild with clean YAML metadata and isolated Main account vault save.
+version: "5.13.37"
+description: Repository metadata linebreak fix with clean YAML and verified version markers.
 url: https://github.com/DenyTwo918/TF2-HA
 arch:
   - amd64
@@ -46,7 +46,7 @@ options:
   max_offer_value_ref: 100
   do_not_trade_tags: "scam,blocked,do_not_trade"
   backpack_tf_enabled: true
-  backpack_tf_user_agent: "TF2-HA-TF2-Trading-Hub/5.13.36"
+  backpack_tf_user_agent: "TF2-HA-TF2-Trading-Hub/5.13.37"
   backpack_tf_base_url: "https://backpack.tf"
   backpack_tf_cache_ttl_minutes: 30
   backpack_tf_retry_count: 2
