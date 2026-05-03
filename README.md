@@ -2,8 +2,8 @@
 
 Home Assistant add-on repository snapshot.
 
-Current TF2 Trading Hub build: 5.13.37 – Repo YAML Linebreak Fix.
+Current TF2 Trading Hub build: 5.13.38 – Schema Validator Fix.
 
-## 5.13.37 – Repo YAML Linebreak Fix
+## 5.13.38 – Schema Validator Fix
 
 Repository package rebuilt with preserved LF line endings and aligned Home Assistant version markers.

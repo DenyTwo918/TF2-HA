@@ -1,4 +1,4 @@
-# 5.13.37 – Repo YAML Linebreak Fix
+# 5.13.38 – Schema Validator Fix
 
 - Rebuilds the repository package with preserved LF line endings.
 - Aligns Home Assistant version markers across config.yaml, build.yaml, Dockerfiles, run.sh, package.json, backend and UI files.

@@ -108,54 +108,54 @@ Adds a Backpack.tf listing verification endpoint, automatic post-publish verific
 The maintainer can now auto-fill buy listing slots toward `target_active_buy_listings` while keeping a default stock cap of one item per SKU. Existing active buy listings, owned items, active sell listings and good incoming offers prevent another buy listing for the same item.
 
 
-## 5.13.37 – Fast Dashboard Load & Faster Listing Fill
+## 5.13.38 – Fast Dashboard Load & Faster Listing Fill
 
 Adds a central Trading Brain status layer for buy/sell/counteroffer decisions, profit floors, SKU stock cap and balanced key+metal currency policy. This is the baseline for the 5.13 refactor line.
 
 
-## 5.13.37 – Fast Dashboard Load & Faster Listing Fill
+## 5.13.38 – Fast Dashboard Load & Faster Listing Fill
 
 Trading Brain now receives a unified market-pricing summary from classifieds snapshots: highest buyer, lowest seller, spread, buyer/seller counts, expected profit and weak-market reasons. Buy drafts can use highest-buyer + bonus and sell drafts can use lowest-seller - undercut, while profit floors and stock cap remain enforced.
 
-## 5.13.37 – Fast Dashboard Load & Faster Listing Fill
+## 5.13.38 – Fast Dashboard Load & Faster Listing Fill
 
 Manual maintainer runs now start in the background so Home Assistant ingress does not show a black screen / 502 while Backpack.tf calls are still running. Market Pricing Pipeline status is also wired into the production dashboard status object.
 
 
-## 5.13.37 – Stock Count & Stack Sell Price Truth
+## 5.13.38 – Stock Count & Stack Sell Price Truth
 
 The maintainer now skips buy drafts that are missing required keys/refined metal and immediately continues filling the next affordable listing. Missing currency is a skip reason, not a bot-stopping error.
 
 
-## 5.13.37 – Affordable Candidate Rotation
+## 5.13.38 – Affordable Candidate Rotation
 
 The main dashboard suppresses impossible unaffordable buy samples, reports actionable candidates first, and keeps the maintainer moving past candidates that the account cannot fund yet.
 
 
-## 5.13.37 – Cap-Fill Draft Prune & Actionable Rebuild
+## 5.13.38 – Cap-Fill Draft Prune & Actionable Rebuild
 
 Unfundable/corrupt buy drafts are pruned before maintainer runs so the bot can continue filling affordable listings instead of staying stuck on one impossible candidate.
 
 
-## 5.13.37 – Fallback Metrics & Stale Sell Listing Guard
+## 5.13.38 – Fallback Metrics & Stale Sell Listing Guard
 
 Cap-fill no longer treats missing Backpack.tf snapshot data as a hard dead stop. In balanced mode, affordable buy drafts can use schema/planning values as a fallback when no snapshot is available, while crossed/corrupt markets and unaffordable buys stay blocked.
 
 
 
-## 5.13.37 – Fallback Metrics & Stale Sell Listing Guard
+## 5.13.38 – Fallback Metrics & Stale Sell Listing Guard
 
 Shows no-snapshot fallback fill as its own metric and flags stale sell listings that no longer match owned inventory.
 
 
-## 5.13.37 – Crash Watchdog & Credential Vault Recovery
+## 5.13.38 – Crash Watchdog & Credential Vault Recovery
 
 Maintainer prioritizes sell work before buy cap-fill: owned inventory sell detector runs first, sell draft backlog can defer new buy listings, and the dashboard shows Sell priority status. Existing safety gates remain unchanged: no Steam auto-accept, no Steam Guard auto-confirm, guarded Backpack.tf classifieds only.
-## 5.13.37 – Main Account Canonical Vault Save
+## 5.13.38 – Main Account Canonical Vault Save
 
 Credential saves are now verified by re-reading the canonical Main account vault. A last-good backup is written after successful saves, empty vault files can recover from legacy/options data, and the UI no longer clears token fields until verification succeeds.
 
-## 5.13.37 – Live Dashboard Performance Pass
+## 5.13.38 – Live Dashboard Performance Pass
 
 Inspired by lightweight pollers like TF2Autobot and Gladiator.tf, the dashboard now uses a fast lite-status path so opening the addon panel no longer pegs CPU/RAM or triggers the OOM-restart loop on small Home Assistant hosts. Safe-boot mode is no longer required to keep the UI responsive.
 
@@ -166,6 +166,6 @@ Inspired by lightweight pollers like TF2Autobot and Gladiator.tf, the dashboard 
 - Frontend backs off to 60 s polling when the tab is hidden and applies exponential backoff (up to 2 min) on repeated errors. Focus/visibility events reset the backoff.
 - `setLog` now caps the in-page `<pre>` payload at 64 KB so large diagnostic responses no longer balloon browser RAM. Use the diagnostic bundle download for full payloads.
 
-## 5.13.37 – Repo YAML Linebreak Fix
+## 5.13.38 – Schema Validator Fix
 
-Re-publishes 5.13.37 with clean Home Assistant metadata files (`repository.yaml`, `config.yaml`, `build.yaml`, `run.sh`) and a fresh version bump so Supervisor can detect the update after repository cache issues.
+Re-publishes 5.13.38 with clean Home Assistant metadata files (`repository.yaml`, `config.yaml`, `build.yaml`, `run.sh`) and a fresh version bump so Supervisor can detect the update after repository cache issues.
