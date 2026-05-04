@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const APP_VERSION = '5.13.43';
+const APP_VERSION = '5.13.44';
 const APP_NAME = 'TF2 Trading Hub';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -90,6 +90,9 @@ const TRADE_COUNTEROFFER_PATH = path.join(DATA_DIR, 'tf2-hub-trade-counteroffers
 const STARTUP_LISTING_ARCHIVE_PATH = path.join(DATA_DIR, 'tf2-hub-startup-listing-archive.json');
 const STARTUP_REBUILD_PATH = path.join(DATA_DIR, 'tf2-hub-startup-rebuild-controller.json');
 const TRADING_BRAIN_V513_PATH = path.join(DATA_DIR, 'tf2-hub-trading-brain-v513.json');
+const MAIN_ACCOUNT_LAST_GOOD_PATH = path.join(DATA_DIR, 'tf2-hub-main-account.last-good.json');
+const LAST_CRASH_PATH = path.join(DATA_DIR, 'tf2-hub-last-crash.json');
+const MIGRATION_STATE_PATH = path.join(DATA_DIR, 'tf2-hub-migration-state.json');
 
 // 5.12.33 – removed legacy field names that must never appear in /data or diagnostics
 const REMOVED_KEY_PART = 'bud' + 'get';
@@ -247,7 +250,7 @@ function writeJson(filePath, value) {
   fs.renameSync(tmp, filePath);
   __notifyWatchers(filePath);
 }
-// 5.13.43: cache invalidation hooks.  When a file the publish wizard reads
+// 5.13.42: cache invalidation hooks.  When a file the publish wizard reads
 // gets rewritten, we drop the cached status so the next request rebuilds.
 const __writeWatchers = new Map();
 function __notifyWatchers(filePath) {
@@ -259,7 +262,7 @@ function watchJsonWrite(filePath, fn) {
   if (!__writeWatchers.has(filePath)) __writeWatchers.set(filePath, new Set());
   __writeWatchers.get(filePath).add(fn);
 }
-// 5.13.43: writes only when the serialized value actually changed.  Uses an
+// 5.13.42: writes only when the serialized value actually changed.  Uses an
 // in-memory hash cache to avoid the round-trip read; falls back to a one-time
 // disk hash when the process restarts.  Eliminates the disk-I/O storm caused by
 // the dashboard re-writing PUBLISH_WIZARD_PATH every 8s with identical data.
@@ -300,7 +303,7 @@ function bool(value, fallback = false) {
   return fallback;
 }
 
-// ── 5.13.43 – Runtime Event Logger ─────────────────────────────────────
+// ── 5.13.42 – Runtime Event Logger ─────────────────────────────────────
 const RUNTIME_LOG_LEVELS = { error: 0, warn: 1, info: 2, debug: 3, audit: 2 };
 const RUNTIME_SECRET_KEY_RE = /(token|secret|password|passwd|cookie|session|authorization|steamloginsecure|shared_secret|identity_secret|refresh|mafile|api[_-]?key|steam_web_api_key|steam_api_key|backpack_tf_access_token|backpack_tf_api_key|access_token|sda_password)/i;
 function runtimeLoggerOptions() {
@@ -426,7 +429,9 @@ function writeCrashReport(kind, error, extra = {}) {
     };
     crashes.push(entry);
     fs.writeFileSync(CRASH_REPORT_PATH, JSON.stringify({ ok: false, version: APP_VERSION, updated_at: entry.ts, last: entry, crashes }, null, 2));
+    try { fs.writeFileSync(LAST_CRASH_PATH, JSON.stringify({ ok: false, version: APP_VERSION, captured_at: entry.ts, kind: entry.kind, pid: entry.pid, uptime_seconds: entry.uptime_seconds, error: entry.error, extra: entry.extra }, null, 2)); } catch {}
     console.error(`[tf2-hub] ${kind}: ${entry.error.split('\n')[0]}`);
+    try { appendActionFeed('runtime_crash_captured', { kind, uptime_seconds: entry.uptime_seconds, error: entry.error.split('\n')[0] }); } catch {}
   } catch (writeError) {
     try { console.error('[tf2-hub] failed to write crash report:', safeErrorString(writeError)); } catch {}
   }
@@ -439,6 +444,10 @@ process.on('unhandledRejection', reason => {
 });
 process.on('warning', warning => {
   try { writeCrashReport('processWarning', warning, { name: warning && warning.name }); } catch {}
+});
+process.on('SIGTERM', () => {
+  try { writeCrashReport('SIGTERM', 'Process received SIGTERM', { note: 'Graceful shutdown signal. Add-on is stopping.' }); } catch {}
+  process.exit(0);
 });
 setInterval(() => {
   try {
@@ -625,6 +634,7 @@ function recoverLegacyMainAccountVaults() {
     if (candidate) candidates.push(candidate);
   };
   tryFile(MAIN_ACCOUNT_VAULT_PATH, 'canonical');
+  tryFile(MAIN_ACCOUNT_LAST_GOOD_PATH, 'main_account_last_good');
   tryFile(HUB_CREDENTIALS_PATH, path.basename(HUB_CREDENTIALS_PATH));
   tryFile(HUB_CREDENTIALS_LAST_GOOD_PATH, path.basename(HUB_CREDENTIALS_LAST_GOOD_PATH));
   tryFile(OPTIONS_PATH, 'options.json');
@@ -665,6 +675,7 @@ function writeMainAccountVault(account = {}, source = 'canonical') {
   const vault = mainAccountVaultShape(normalized, source);
   atomicWriteJson(MAIN_ACCOUNT_VAULT_PATH, vault, 0o600);
   if (credentialAccountHasAnySecret(normalized)) {
+    try { atomicWriteJson(MAIN_ACCOUNT_LAST_GOOD_PATH, vault, 0o600); } catch {}
     try { atomicWriteJson(HUB_CREDENTIALS_LAST_GOOD_PATH, vault, 0o600); } catch {}
   }
   return vault;
@@ -739,15 +750,27 @@ function readCanonicalMainAccountVaultStrict() {
   const raw = readJson(MAIN_ACCOUNT_VAULT_PATH, null);
   const candidate = extractMainAccountCandidate('canonical_vault', raw);
   if (candidate && credentialAccountHasAnySecret(candidate.account)) return mainAccountVaultShape(candidate.account, 'canonical_vault');
+
+  // 5.13.43: status endpoints must self-heal too. The live workflow already
+  // used readMainAccountVault(), but /api/main-account/status was strict and
+  // could show "missing" after a restart if the canonical file was absent or
+  // empty while a last-good/options mirror still existed. Recover immediately
+  // and rewrite the canonical vault before the UI reads readiness.
+  const recovered = recoverLegacyMainAccountVaults();
+  if (recovered && recovered.main_account && credentialAccountHasAnySecret(recovered.main_account)) {
+    try { mirrorMainAccountCompatibility(recovered.main_account); } catch {}
+    try { runtimeLogVaultStatus('status_self_healed', publicMainAccountStatus(recovered.main_account, recovered.source || 'recovered'), { endpoint: 'main-account/status', reason: 'canonical_missing_or_empty' }); } catch {}
+    return mainAccountVaultShape(recovered.main_account, recovered.source || 'status_recovered');
+  }
   return mainAccountVaultShape({ id: 'main', role: 'main', label: 'Main account', updated_at: null }, fs.existsSync(MAIN_ACCOUNT_VAULT_PATH) ? 'canonical_vault_empty' : 'canonical_vault_missing');
 }
 function canonicalFieldWord(present) { return present ? 'present' : 'missing'; }
 function canonicalMainAccountStatusResponse(extra = {}) {
-  const vaultExists = fs.existsSync(MAIN_ACCOUNT_VAULT_PATH);
   const vault = readCanonicalMainAccountVaultStrict();
+  const vaultExists = fs.existsSync(MAIN_ACCOUNT_VAULT_PATH);
   const account = vault.main_account || {};
   const publicStatus = publicMainAccountStatus(account, vault.source || 'canonical_vault');
-  const source = vaultExists ? 'canonical_vault' : 'canonical_vault_missing';
+  const source = vault.source || (vaultExists ? 'canonical_vault' : 'canonical_vault_missing');
   const publicMain = { ...publicStatus, source, missing: { ...(publicStatus.missing || {}) } };
   const response = {
     ok: true,
@@ -775,7 +798,7 @@ function canonicalMainAccountStatusResponse(extra = {}) {
   try { runtimeLogVaultStatus('status_read', response.main_account, { endpoint: 'main-account/status', vault_exists: vaultExists, source }); } catch {}
   return response;
 }
-// ── 5.13.43 – Provider readiness health ───────────────────────────────
+// ── 5.13.42 – Provider readiness health ───────────────────────────────
 function providerHealthText(value, depth = 0, seen = new WeakSet()) {
   try {
     if (value === null || value === undefined) return '';
@@ -869,7 +892,7 @@ function providerHealthState() {
     providerHealthCountCollection(priceSchemaRaw, ['items', 'prices', 'schema', 'entries', 'results'])
   );
   const listingCachePriceCount = providerHealthNumber(listingsRaw, ['prices_count', 'summary.prices_count']);
-  // 5.13.43: do not treat the legacy Steam offer pricelist as Backpack.tf market price schema.
+  // 5.13.42: do not treat the legacy Steam offer pricelist as Backpack.tf market price schema.
   // That file can contain a few trade-review entries and caused a false "prices ready" state with 0 schema prices.
   const priceCount = Math.max(priceSchemaCount, listingCachePriceCount);
   const inventoryItems = Math.max(
@@ -995,6 +1018,65 @@ function fileMetaRedacted(filePath) {
     return { path: filePath, exists: fs.existsSync(filePath), readable: false, size_bytes: 0, mtime: null, error: error && error.code ? error.code : safeError(error) };
   }
 }
+function ensureMainAccountRestartPersistence(reason = 'startup') {
+  const fileStat = (p) => { try { const s = fs.statSync(p); return { exists: true, size_bytes: s.size, mtime: s.mtime.toISOString() }; } catch { return { exists: false, size_bytes: 0, mtime: null }; } };
+  const canonicalStat = fileStat(MAIN_ACCOUNT_VAULT_PATH);
+  const lastGoodStat = fileStat(MAIN_ACCOUNT_LAST_GOOD_PATH);
+  const compatStat = fileStat(HUB_CREDENTIALS_PATH);
+  runtimeLogger.info('startup', 'persistence_guard_check', 'Main account persistence guard startup check', { reason, canonical: canonicalStat, last_good: lastGoodStat, compat: compatStat });
+
+  let vault = readMainAccountVault();
+  let account = vault.main_account || {};
+  let hasAny = credentialAccountHasAnySecret(account);
+  let restored = false;
+
+  if (!hasAny && lastGoodStat.exists) {
+    const lgRaw = readJson(MAIN_ACCOUNT_LAST_GOOD_PATH, null);
+    const lgCandidate = extractMainAccountCandidate('main_account_last_good', lgRaw);
+    if (lgCandidate && credentialAccountHasAnySecret(lgCandidate.account)) {
+      try {
+        atomicWriteJson(MAIN_ACCOUNT_VAULT_PATH, mainAccountVaultShape(lgCandidate.account, 'restored_from_last_good'), 0o600);
+        vault = readMainAccountVault();
+        account = vault.main_account || {};
+        hasAny = credentialAccountHasAnySecret(account);
+        restored = true;
+        try { audit('main_account_restored_from_last_good', { reason, last_good_path: MAIN_ACCOUNT_LAST_GOOD_PATH }); } catch {}
+        try { appendActionFeed('main_account_restored_from_last_good', { reason }); } catch {}
+        runtimeLogger.info('startup', 'main_account_restored_from_last_good', 'Canonical vault restored from last-good file', { reason, last_good_path: path.basename(MAIN_ACCOUNT_LAST_GOOD_PATH) });
+      } catch {}
+    }
+  }
+
+  const status = publicMainAccountStatus(account, vault.source || 'canonical');
+  if (hasAny) {
+    try { writeMainAccountVault(account, vault.source || 'startup_recovered'); } catch {}
+    try { mirrorMainAccountCompatibility(account); } catch {}
+    try {
+      atomicWriteJson(path.join(DATA_DIR, 'tf2-hub-main-account-persistence-check.json'), {
+        ok: true,
+        version: APP_VERSION,
+        checked_at: new Date().toISOString(),
+        reason,
+        restored_from_last_good: restored,
+        source: vault.source || 'canonical',
+        canonical: canonicalStat,
+        last_good: lastGoodStat,
+        compat: compatStat,
+        steamid64_saved: status.steam_id64_saved,
+        steam_api_key_saved: status.steam_web_api_key_saved,
+        backpack_access_token_saved: status.backpack_tf_access_token_saved,
+        backpack_api_key_saved: status.backpack_tf_api_key_saved,
+        readiness: status.readiness,
+        missing: status.missing,
+        secrets_returned: false
+      }, 0o600);
+    } catch {}
+    try { runtimeLogVaultStatus('restart_persistence_verified', status, { reason, restored_from_last_good: restored, canonical: canonicalStat, last_good: lastGoodStat, compat: compatStat }); } catch {}
+  } else {
+    try { runtimeLogVaultStatus('restart_persistence_missing', status, { reason, canonical: canonicalStat, last_good: lastGoodStat, compat: compatStat }); } catch {}
+  }
+  return { ok: hasAny, version: APP_VERSION, reason, source: vault.source || 'missing', restored_from_last_good: restored, status, secrets_returned: false };
+}
 function mainAccountDebugStatus() {
   const status = canonicalMainAccountStatusResponse();
   const lastTrace = readJson(MAIN_ACCOUNT_SAVE_TRACE_PATH, { ok: true, version: APP_VERSION, events: [] });
@@ -1014,6 +1096,30 @@ function mainAccountDebugStatus() {
     readiness: status.readiness,
     missing: status.missing,
     last_save_trace: Array.isArray(lastTrace.events) ? lastTrace.events.slice(-40) : [],
+    secrets_returned: false
+  };
+}
+function buildPersistenceDebug() {
+  const fileStat = (p) => { try { const s = fs.statSync(p); const raw = readJson(p, null); const hashPrefix = raw ? crypto.createHash('sha256').update(JSON.stringify(raw)).digest('hex').slice(0, 8) : null; const candidate = extractMainAccountCandidate('debug', raw); const ready = candidate && credentialAccountHasAnySecret(candidate.account); return { exists: true, size_bytes: s.size, mtime: s.mtime.toISOString(), hash_prefix: hashPrefix, readiness: ready ? 'ready' : 'missing_credentials' }; } catch { return { exists: false, size_bytes: 0, mtime: null, hash_prefix: null, readiness: 'file_missing' }; } };
+  const canonicalStat = fileStat(MAIN_ACCOUNT_VAULT_PATH);
+  const lastGoodStat = fileStat(MAIN_ACCOUNT_LAST_GOOD_PATH);
+  const compatStat = fileStat(HUB_CREDENTIALS_PATH);
+  const persistCheck = readJson(path.join(DATA_DIR, 'tf2-hub-main-account-persistence-check.json'), null);
+  const saveTrace = readJson(MAIN_ACCOUNT_SAVE_TRACE_PATH, { ok: true, events: [] });
+  const lastCrash = readJson(LAST_CRASH_PATH, null);
+  const currentVault = readCanonicalMainAccountVaultStrict();
+  const currentAccount = currentVault.main_account || {};
+  const currentStatus = publicMainAccountStatus(currentAccount, currentVault.source || 'canonical');
+  return {
+    ok: true,
+    version: APP_VERSION,
+    canonical: { ...canonicalStat, path: path.basename(MAIN_ACCOUNT_VAULT_PATH) },
+    last_good: { ...lastGoodStat, path: path.basename(MAIN_ACCOUNT_LAST_GOOD_PATH) },
+    compatibility: { ...compatStat, path: path.basename(HUB_CREDENTIALS_PATH) },
+    current_in_memory_readiness: currentStatus.readiness,
+    last_save_trace: Array.isArray(saveTrace.events) ? saveTrace.events.slice(-5) : [],
+    last_startup_restore_trace: persistCheck ? { checked_at: persistCheck.checked_at, reason: persistCheck.reason, restored_from_last_good: persistCheck.restored_from_last_good || false, readiness: persistCheck.readiness } : null,
+    last_crash_summary: lastCrash ? { kind: lastCrash.kind, captured_at: lastCrash.captured_at, uptime_seconds: lastCrash.uptime_seconds, error_preview: lastCrash.error ? String(lastCrash.error).slice(0, 120) : null } : null,
     secrets_returned: false
   };
 }
@@ -1038,11 +1144,20 @@ function isolatedMainAccountSave(payload = {}, requestId = runtimeRequestId()) {
     runtimeLogger.warn('main_account', 'main-account.save.validation_failed', 'Main account save validation failed', { requestId, trace_id: traceId, missing });
     return { ok: false, version: APP_VERSION, saved: false, verified: false, error: 'Missing required Main account credential fields.', missing, status: { steamid64: canonicalFieldWord(Boolean(candidate.steam_id64)), steam_api_key: canonicalFieldWord(Boolean(candidate.steam_web_api_key)), backpack_tf_access_token: canonicalFieldWord(Boolean(candidate.backpack_tf_access_token)), backpack_tf_api_key: canonicalFieldWord(Boolean(candidate.backpack_tf_api_key)), backpack_tf_token: canonicalFieldWord(Boolean(candidate.backpack_tf_access_token || candidate.backpack_tf_api_key)), scope: 'main_only' }, trace_id: traceId, elapsed_ms: Date.now() - startedAt, secrets_returned: false };
   }
-  const vault = mainAccountVaultShape(candidate, 'canonical_vault');
-  trace('main-account.save.write_start', { vault_path: MAIN_ACCOUNT_VAULT_PATH });
-  atomicWriteJson(MAIN_ACCOUNT_VAULT_PATH, vault, 0o600);
-  trace('main-account.save.write_ok', { vault_path: MAIN_ACCOUNT_VAULT_PATH });
-  runtimeLogger.info('main_account', 'main-account.save.write_ok', 'Canonical Main account vault written', { requestId, trace_id: traceId, vault_path: MAIN_ACCOUNT_VAULT_PATH });
+  const requestFieldsPresent = { steam_id64: Boolean(payload.steam_id64 || payload.steamid64), steam_web_api_key: Boolean(payload.steam_web_api_key || payload.steam_api_key), backpack_tf_access_token: Boolean(payload.backpack_tf_access_token || payload.backpack_tf_token || payload.backpack_token), backpack_tf_api_key: Boolean(payload.backpack_tf_api_key || payload.backpack_api_key || payload.api_key) };
+  const keptExisting = { steam_id64: !requestFieldsPresent.steam_id64 && Boolean(current.steam_id64), steam_web_api_key: !requestFieldsPresent.steam_web_api_key && Boolean(current.steam_web_api_key), backpack_tf_access_token: !requestFieldsPresent.backpack_tf_access_token && Boolean(current.backpack_tf_access_token), backpack_tf_api_key: !requestFieldsPresent.backpack_tf_api_key && Boolean(current.backpack_tf_api_key) };
+  trace('main-account.save.write_start', { vault_path: MAIN_ACCOUNT_VAULT_PATH, last_good_path: MAIN_ACCOUNT_LAST_GOOD_PATH, compatibility_path: HUB_CREDENTIALS_PATH, request_fields_present: requestFieldsPresent, kept_existing: keptExisting });
+  const vault = writeMainAccountVault(candidate, 'canonical_vault');
+  mirrorMainAccountCompatibility(vault.main_account || candidate);
+  const writtenPaths = { canonical: MAIN_ACCOUNT_VAULT_PATH, last_good: MAIN_ACCOUNT_LAST_GOOD_PATH, compatibility: HUB_CREDENTIALS_PATH };
+  trace('main-account.save.write_ok', {
+    vault_path: MAIN_ACCOUNT_VAULT_PATH,
+    vault_exists: fs.existsSync(MAIN_ACCOUNT_VAULT_PATH),
+    last_good_exists: fs.existsSync(MAIN_ACCOUNT_LAST_GOOD_PATH),
+    compat_last_good_exists: fs.existsSync(HUB_CREDENTIALS_LAST_GOOD_PATH),
+    compatibility_exists: fs.existsSync(HUB_CREDENTIALS_PATH)
+  });
+  runtimeLogger.info('main_account', 'main-account.save.write_ok', 'Canonical Main account vault and persistence mirrors written', { requestId, trace_id: traceId, vault_path: MAIN_ACCOUNT_VAULT_PATH, last_good_path: MAIN_ACCOUNT_LAST_GOOD_PATH, compatibility_path: HUB_CREDENTIALS_PATH });
   const verifyStatus = canonicalMainAccountStatusResponse({ save_trace_id: traceId });
   const verified = Boolean(verifyStatus.steamid64 === 'present' && verifyStatus.steam_api_key === 'present' && verifyStatus.backpack_tf_access_token === 'present' && verifyStatus.backpack_tf_api_key === 'present');
   trace(verified ? 'main-account.save.verify_ok' : 'main-account.save.verify_failed', { steamid64: verifyStatus.steamid64, steam_api_key: verifyStatus.steam_api_key, backpack_tf_access_token: verifyStatus.backpack_tf_access_token, backpack_tf_api_key: verifyStatus.backpack_tf_api_key, readiness: verifyStatus.readiness });
@@ -1059,6 +1174,7 @@ function isolatedMainAccountSave(payload = {}, requestId = runtimeRequestId()) {
     trace_id: traceId,
     elapsed_ms: duration,
     vault_path: MAIN_ACCOUNT_VAULT_PATH,
+    save_trace: { request_fields_present: requestFieldsPresent, kept_existing: keptExisting, written_paths: writtenPaths, verified_after_read: verified, elapsed_ms: duration },
     status: { steamid64: verifyStatus.steamid64, steam_api_key: verifyStatus.steam_api_key, backpack_tf_access_token: verifyStatus.backpack_tf_access_token, backpack_tf_api_key: verifyStatus.backpack_tf_api_key, backpack_tf_token: verifyStatus.backpack_tf_token, scope: 'main_only' },
     secrets_returned: false
   };
@@ -1384,7 +1500,7 @@ function getOptions() {
     backpack_tf_enabled: bool(options.backpack_tf_enabled, true),
     backpack_tf_access_token: String(credentialAccount.backpack_tf_access_token || options.backpack_tf_access_token || '').trim(),
     backpack_tf_api_key: String(credentialAccount.backpack_tf_api_key || options.backpack_tf_api_key || '').trim(),
-    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.43').trim(),
+    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.44').trim(),
     backpack_tf_base_url: String(options.backpack_tf_base_url || 'https://backpack.tf').replace(/\/$/, ''),
     backpack_tf_cache_ttl_minutes: clamp(options.backpack_tf_cache_ttl_minutes, 30, 1, 1440),
     backpack_tf_retry_count: clamp(options.backpack_tf_retry_count, 2, 0, 5),
@@ -3057,7 +3173,7 @@ class BackpackTfV2ListingManager {
     return configured.endsWith('/api') ? configured : `${configured}/api`;
   }
   headers(authMode = 'token') {
-    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.43' };
+    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.44' };
     if (authMode === 'token' && this.options.backpack_tf_access_token) headers['X-Auth-Token'] = this.options.backpack_tf_access_token;
     if (authMode === 'bearer' && this.options.backpack_tf_access_token) headers.authorization = `Bearer ${this.options.backpack_tf_access_token}`;
     if (authMode === 'api_key_header' && this.options.backpack_tf_api_key) headers['x-api-key'] = this.options.backpack_tf_api_key;
@@ -3078,7 +3194,7 @@ class BackpackTfV2ListingManager {
     if (!cache.ok || !cache.updated_at) return false;
     const fresh = Date.now() - Date.parse(cache.updated_at) < this.options.backpack_tf_cache_ttl_minutes * 60 * 1000;
     if (!fresh) return false;
-    // 5.13.43: a fresh listings cache must not block a price-schema retry.
+    // 5.13.42: a fresh listings cache must not block a price-schema retry.
     // If an API key is saved and we still have no Backpack price schema, force a real provider sync.
     if (this.options.backpack_tf_api_key) {
       const schema = readJson(BACKPACK_PRICE_SCHEMA_PATH, { ok: false, prices: [], prices_count: 0 });
@@ -4253,6 +4369,12 @@ class DataPersistenceMigrationService {
     return { ok: true, backup: path.basename(dir), files: copied };
   }
   migrate() {
+    const migrationState = readJson(MIGRATION_STATE_PATH, { schema_version: 0 });
+    if (migrationState && migrationState.schema_version === DATA_SCHEMA_VERSION) {
+      runtimeLogger.info('startup', 'migration_skipped', 'Migration skipped, schema already current', { schema_version: DATA_SCHEMA_VERSION });
+      try { this.audit.write('data_migration_skipped', { schema_version: DATA_SCHEMA_VERSION, reason: 'already_current' }); } catch {}
+      return this.status();
+    }
     const options = getOptions();
     if (options.backup_before_migration) this.backup('pre_migration_5_4_2');
     const now = new Date().toISOString();
@@ -4272,6 +4394,7 @@ class DataPersistenceMigrationService {
     }
     this.audit.write('data_migration_completed', { schema_version: DATA_SCHEMA_VERSION, legacy_fields_stripped: true });
     appendActionFeed('data_migration_completed', { schema_version: DATA_SCHEMA_VERSION });
+    try { writeJson(MIGRATION_STATE_PATH, { ok: true, schema_version: DATA_SCHEMA_VERSION, migrated_at: new Date().toISOString(), version: APP_VERSION }); } catch {}
     return this.status();
   }
   exportRedacted() {
@@ -4285,7 +4408,7 @@ class DataPersistenceMigrationService {
     return { ok: true, exported_at: new Date().toISOString(), schema_version: DATA_SCHEMA_VERSION, payload };
   }
 }
-// 5.13.43: bounded redactor.  The unbounded version walked the entire market
+// 5.13.42: bounded redactor.  The unbounded version walked the entire market
 // classifieds mirror (1000+ items, deeply nested) on every dashboard poll, which
 // pegged CPU and ballooned RAM on small Home Assistant hosts.  We now cap depth,
 // array length, and key count, returning a placeholder past the limits.  Secret
@@ -4952,7 +5075,7 @@ class HubListingDraftService {
     } catch (err) {
       providerStatus = 'error';
       providerSummary = safeError(err);
-      friendly = String(safeError(err)).includes('apiBase is not a function') ? 'Internal publish executor bug: apiBase helper was not wired. Update to 5.13.43 or newer.' : friendlyPublishError('network_or_timeout', safeError(err));
+      friendly = String(safeError(err)).includes('apiBase is not a function') ? 'Internal publish executor bug: apiBase helper was not wired. Update to 5.13.42 or newer.' : friendlyPublishError('network_or_timeout', safeError(err));
     }
     const syncedProviderPayloadPreview = {
       ...(built.draft.provider_payload_preview || {}),
@@ -6258,7 +6381,7 @@ function buildPublishWizardStatus() {
   return result;
 }
 
-// 5.13.43 – cached + lite publish wizard status.
+// 5.13.42 – cached + lite publish wizard status.
 //
 // The dashboard polls /api/publish-wizard/status every 8s.  The full builder
 // reads ~10 JSON files, runs 12+ status sub-builders, walks each result through
@@ -7696,7 +7819,7 @@ class SteamInventorySyncService {
       let accepted = null;
       let lastFailure = null;
       for (const variant of this.inventoryUrls(options.steam_id64, startAssetId)) {
-        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.43' } });
+        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.44' } });
         const body = result.body || {};
         const parsed = result.ok ? this.extractInventoryPayload(body) : { ok: false, error: result.error || body.error || body.raw || `HTTP ${result.status}` };
         attempts.push({
@@ -12873,6 +12996,9 @@ async function handleApi(req, res, pathname) {
   if (pathname === '/api/main-account/debug-redacted') {
     return json(res, 200, mainAccountDebugStatus());
   }
+  if (pathname === '/api/main-account/persistence-debug') {
+    return json(res, 200, buildPersistenceDebug());
+  }
   if (pathname === '/api/credentials/status') {
     return json(res, 200, withProviderHealthStatus(canonicalMainAccountStatusResponse()));
   }
@@ -13334,7 +13460,7 @@ async function handleApi(req, res, pathname) {
   }
   if (pathname === '/api/publish-wizard/prepare-key-to-metal' && (req.method === 'POST' || req.method === 'GET')) return json(res, 200, prepareKeyToMetalDraft(getOptions(), auditService));
   if (pathname === '/api/most-traded/status' || pathname === '/api/offer-booster/status' || pathname === '/api/auto-list-anything/status') return json(res, 200, buildMostTradedAndKeysStatus(getOptions()));
-  // 5.13.43: cached status + lite polling endpoint.  Lite is small and skips
+  // 5.13.42: cached status + lite polling endpoint.  Lite is small and skips
   // every heavy sub-status; it is what the live dashboard polls every few
   // seconds.  The full /status response is served from a short-TTL memory cache
   // (PUBLISH_WIZARD_CACHE_TTL_MS) so opening the panel does not peg CPU.
@@ -13464,17 +13590,28 @@ function startScheduler() {
     const options = getOptions();
     if (tickRunning) return;
     tickRunning = true;
+    const tickStart = Date.now();
+    runtimeLogger.info('scheduler', 'scheduler_tick_started', 'Scheduler tick started', { uptime_seconds: Math.round(process.uptime()) });
     Promise.resolve().then(async () => {
       try {
-        if (hubAutopilot.due()) await hubAutopilot.run('scheduled_pipeline').catch(error => audit('scheduled_pipeline_failed', { message: safeError(error) }));
-        if (classifiedsMaintainer.due()) await classifiedsMaintainer.run('scheduled_classifieds_maintainer').catch(error => audit('scheduled_classifieds_maintainer_failed', { message: safeError(error) }));
+        if (hubAutopilot.due()) {
+          runtimeLogger.info('scheduler', 'scheduler_job_running', 'Scheduler running job', { job: 'scheduled_pipeline' });
+          await hubAutopilot.run('scheduled_pipeline').catch(error => { runtimeLogger.error('scheduler', 'scheduler_job_failed', 'Scheduler job failed', { job: 'scheduled_pipeline', error: safeError(error) }); audit('scheduled_pipeline_failed', { message: safeError(error) }); });
+        }
+        if (classifiedsMaintainer.due()) {
+          runtimeLogger.info('scheduler', 'scheduler_job_running', 'Scheduler running job', { job: 'scheduled_classifieds_maintainer' });
+          await classifiedsMaintainer.run('scheduled_classifieds_maintainer').catch(error => { runtimeLogger.error('scheduler', 'scheduler_job_failed', 'Scheduler job failed', { job: 'scheduled_classifieds_maintainer', error: safeError(error) }); audit('scheduled_classifieds_maintainer_failed', { message: safeError(error) }); });
+        }
+        runtimeLogger.info('scheduler', 'scheduler_tick_completed', 'Scheduler tick completed', { elapsed_ms: Date.now() - tickStart });
       } catch (error) {
-        runtimeLogger.error('scheduler', 'scheduler_tick_failed', 'Scheduler tick failed', runtimeErrorContext(error)); audit('scheduler_tick_failed', { message: safeError(error) });
+        runtimeLogger.error('scheduler', 'scheduler_tick_failed', 'Scheduler tick failed', runtimeErrorContext(error));
+        audit('scheduler_tick_failed', { message: safeError(error) });
       }
     }).finally(() => { tickRunning = false; });
   }, 60000);
 }
 ensureDataDir();
+try { ensureMainAccountRestartPersistence('startup_before_options'); } catch (error) { try { audit('main_account_restart_persistence_failed', { message: safeError(error) }); } catch {} }
 runtimeLogger.info('startup', 'addon_start', 'TF2 Trading Hub starting', { version: APP_VERSION, dataDir: DATA_DIR, pid: process.pid });
 runtimeLogger.info('startup', 'version_loaded', 'Runtime version loaded', { version: APP_VERSION });
 if (!fs.existsSync(PRICELIST_PATH)) writeJson(PRICELIST_PATH, defaultPricelist());
@@ -13501,5 +13638,5 @@ __server.listen(PORT, HOST, () => {
     runtimeLogger.error('startup', 'vault_loaded_failed', 'Main account vault startup status failed', runtimeErrorContext(error));
   }
   runtimeLogger.info('startup', 'config_loaded', 'Runtime options loaded', runtimeLoggerOptions());
-  console.log('[tf2-hub] 5.13.43 Main Account Restart Persistence Guard');
+  console.log('[tf2-hub] 5.13.44 Main Account No-Wipe Guard + Crash Trace');
 });

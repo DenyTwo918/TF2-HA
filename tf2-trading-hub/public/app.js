@@ -53,7 +53,7 @@ function updateSimpleUiButton(){const b=document.getElementById('toggleSimpleUi'
 (function initSimpleUi(){try{const forcedKey='tf2_hub_simple_for_5_12_79';if(localStorage.getItem(forcedKey)!=='done'){document.body.classList.add('simple-ui');localStorage.setItem('tf2_hub_ui_mode','simple');localStorage.setItem(forcedKey,'done');}else if(localStorage.getItem('tf2_hub_ui_mode')!=='advanced')document.body.classList.add('simple-ui');setTimeout(updateSimpleUiButton,0);}catch{document.body.classList.add('simple-ui');}})();
 function setSda(value){qs('#sdaOutput').textContent=typeof value==='string'?value:JSON.stringify(value,null,2);}
 function saveJsonDownload(fileName,value){try{const blob=new Blob([JSON.stringify(value,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=fileName||"tf2-hub-diagnostic.json";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);return true;}catch(error){setLog({ok:false,error:'Browser download failed',detail:String(error&&error.message?error.message:error)});return false;}}
-async function downloadCachedDiagnosticFallback(reason){const fallback={ok:false,version:'5.13.43',title:'Client-side diagnostic download fallback',generated_at:new Date().toISOString(),source:'browser_fallback',error:String(reason&&reason.message?reason.message:reason||'Unknown diagnostic download error'),safety_note:'Client fallback only. No live trade, Steam confirmation or Backpack.tf write was executed.'};try{const cached=await api('/api/diagnostics/bundle').catch(()=>null);if(cached&&typeof cached==='object'){cached.client_download_fallback_reason=fallback.error;saveJsonDownload(cached.file_name||('tf2-hub-diagnostic-cached-'+(cached.version||'bundle')+'.json'),cached);return cached;}}catch{}saveJsonDownload('tf2-hub-diagnostic-client-fallback.json',fallback);return fallback;}
+async function downloadCachedDiagnosticFallback(reason){const fallback={ok:false,version:'5.13.44',title:'Client-side diagnostic download fallback',generated_at:new Date().toISOString(),source:'browser_fallback',error:String(reason&&reason.message?reason.message:reason||'Unknown diagnostic download error'),safety_note:'Client fallback only. No live trade, Steam confirmation or Backpack.tf write was executed.'};try{const cached=await api('/api/diagnostics/bundle').catch(()=>null);if(cached&&typeof cached==='object'){cached.client_download_fallback_reason=fallback.error;saveJsonDownload(cached.file_name||('tf2-hub-diagnostic-cached-'+(cached.version||'bundle')+'.json'),cached);return cached;}}catch{}saveJsonDownload('tf2-hub-diagnostic-client-fallback.json',fallback);return fallback;}
 function renderDiagnosticBundle(data){
   const el=qs("#diagnosticBundleStatus");if(!el)return;
   if(!data){el.innerHTML='<p class="muted">No diagnostic bundle yet.</p>';return;}
@@ -166,13 +166,17 @@ function renderCredentials(data){
       ${metric('Priced',`${Number(inventoryHealth.priced||0)} priced`)}
     </div>
     <p class="muted">Credentials saved only means they are stored. Provider health shows whether Backpack.tf and pricing actually work.</p>
+    <p class="muted credentialVaultState">${credentialsReady?pill('all credentials saved from vault','ok'):(steamIdSaved||steamSaved||backpackAccessSaved||backpackApiSaved?pill('partial — paste missing fields below to save','warn'):pill('no credentials saved — paste all four fields below','warn'))}</p>
     <p class="muted">${esc(providerHealth.recommended_next_action||'To switch account: paste the new SteamID64, Steam Web API key, Backpack.tf access token and Backpack.tf API key, then click Save main account.')}</p>
     ${readiness?`<small class="muted">Readiness: ${esc(readiness)} ${pill(tokenState,tokenPillClass)} ${pill(priceState,pricePillClass)}</small>`:''}
     ${providerRows?`<details class="softDetails"><summary>Provider health checks</summary>${providerRows}</details>`:''}
-    <div class="miniRow mainSaveDebug"><b>Last save result</b><small>${esc(lastMainAccountSaveResult?((lastMainAccountSaveResult.verified?'verified':'not verified')+' · '+lastMainAccountSaveResult.duration_ms+' ms · source '+(lastMainAccountSaveResult.vault_source||data.source||'canonical_vault')):'not run yet')}</small><button id="debugMainAccountStatus">Debug status</button></div>
+    <div class="miniRow mainSaveDebug"><b>Last save result</b><small>${esc(lastMainAccountSaveResult?((lastMainAccountSaveResult.verified?'verified':'not verified')+' · '+lastMainAccountSaveResult.duration_ms+' ms · source '+(lastMainAccountSaveResult.vault_source||data.source||'canonical_vault')):'not run yet')}</small><button id="debugMainAccountStatus">Debug status</button><button id="refreshPersistenceDebug">Persistence debug</button></div>
+    <div id="persistenceDebugStatus" class="persistenceDebugInline" style="display:none"></div>
   </div>`;
   const debugBtn=qs('#debugMainAccountStatus');
   if(debugBtn)debugBtn.onclick=async()=>{try{const debug=await api('/api/main-account/debug-status',{timeoutMs:10000});setLog(debug);}catch(e){setLog(e.body||e.message);}};
+  const persistBtn=qs('#refreshPersistenceDebug');
+  if(persistBtn)persistBtn.onclick=async()=>{try{const d=await api('/api/main-account/persistence-debug',{timeoutMs:10000});renderPersistenceDebug(d);}catch(e){const el=qs('#persistenceDebugStatus');if(el){el.style.display='';el.innerHTML='<small class="muted">Persistence debug unavailable: '+esc(e.message||String(e))+'</small>';}}};
   const adv=qs('#advancedAccountList');
   if(adv){
     const rows=accounts.map(a=>`<div class="accountCard"><div class="accountCardTop"><b>${esc(a.label||a.id||'Account')}</b>${pill(a.role_label||a.role||'Account','ok')}</div><p><b>SteamID64:</b> ${esc(a.steam_id64_short||a.steam_id64||(a.steam_id64_saved?'saved':'missing'))}</p><p><b>Credentials:</b> Steam ${a.steam_web_api_key_saved||a.steam_api_key_saved||a.steam_api?'saved':'missing'} · Backpack token ${a.backpack_tf_access_token_saved?'saved':'missing'} · API key ${a.backpack_tf_api_key_saved?'saved':'missing'}</p><div class="buttonRow"><button class="useCredentials" data-id="${esc(a.id||'main')}">Use credentials target</button>${String(a.id||'main')==='main'?'':`<button class="removeAccount dangerSoft" data-id="${esc(a.id)}">Remove</button>`}</div></div>`).join('');
@@ -180,6 +184,20 @@ function renderCredentials(data){
   }
 }
 
+function renderPersistenceDebug(data){
+  const el=qs('#persistenceDebugStatus'); if(!el)return;
+  el.style.display='';
+  if(!data||data.ok===false){el.innerHTML=`<small class="muted">Persistence debug unavailable.</small>`;return;}
+  const c=data.canonical||{};const lg=data.last_good||{};const crash=data.last_crash_summary;const restore=data.last_startup_restore_trace;const trace=(data.last_save_trace||[]).slice(-1)[0];
+  el.innerHTML=`<div class="persistenceDebugCard">
+    <p><b>Canonical vault</b> ${c.exists?pill('ok','ok'):pill('missing','bad')} ${c.exists?`size ${c.size_bytes}b · ${esc(c.mtime||'')}`:''} readiness: ${esc(c.readiness||'?')}</p>
+    <p><b>Last-good vault</b> ${lg.exists?pill('ok','ok'):pill('missing','warn')} ${lg.exists?`size ${lg.size_bytes}b · ${esc(lg.mtime||'')}`:''} readiness: ${esc(lg.readiness||'?')}</p>
+    <p><b>In-memory readiness</b> ${esc(data.current_in_memory_readiness||'?')}</p>
+    ${restore?`<p><b>Last startup restore</b> ${esc(restore.checked_at||'')} · restored from last-good: ${restore.restored_from_last_good?pill('yes','warn'):pill('no','ok')} · readiness: ${esc(restore.readiness||'?')}</p>`:''}
+    ${trace?`<p><b>Last save trace</b> ${esc(trace.stage||'')} · ${esc(trace.ts||'')} · elapsed: ${trace.elapsed_ms||0}ms</p>`:''}
+    ${crash?`<p><b>Last crash</b> ${pill(esc(crash.kind||'unknown'),'bad')} ${esc(crash.captured_at||'')} · uptime ${crash.uptime_seconds||0}s · ${esc(crash.error_preview||'')}</p>`:'<p><b>Last crash</b> '+pill('none','ok')+'</p>'}
+  </div>`;
+}
 function renderTradingCore(data){
   const el=qs('#tradingCore'); if(!el)return;
   if(!data||data.ok===false){el.innerHTML=`<p class="muted">${esc(data?.error||'No trading core snapshot yet.')}</p>`;return;}
@@ -706,7 +724,7 @@ async function refresh(){
     safe('/api/opportunities','opportunities snapshot',12000).then(renderOpportunities)
   ]).catch(()=>{});
   scheduleLiveDashboardRefresh(250);
-  setLog({ok:true,version:(versionAudit&&versionAudit.expected)||'5.13.43',hydrated_dashboard_load:true,message:'Dashboard loaded. Live status will keep hydrating in the background.'});
+  setLog({ok:true,version:(versionAudit&&versionAudit.expected)||'5.13.44',hydrated_dashboard_load:true,message:'Dashboard loaded. Live status will keep hydrating in the background.'});
 }
 async function loadJsonTo(selector,path,options){const data=await api(path,options);qs(selector).textContent=JSON.stringify(data,null,2);return data;}
 async function runReview(){qs('#review').disabled=true;try{await loadJsonTo('#logs','/api/review/run',{method:'POST',body:'{}'});await api('/api/trading-core/build',{method:'POST',body:'{}'});await refresh();}catch(e){setLog(e.body||e.message);}finally{qs('#review').disabled=false;}}
@@ -729,7 +747,12 @@ async function saveSelectedCredentials(extra={}){
     const steamId=(qs('#credentialSteamId')?.value||qs('#mainSteamId')?.value||'').replace(/\s+/g,'').trim();
     if(steamId&&qs('#credentialSteamId'))qs('#credentialSteamId').value=steamId;
     if(steamId&&qs('#mainSteamId'))qs('#mainSteamId').value=steamId;
-    const payload={account_id:accountId,id:'main',role:selectedRole,make_active:true,force_main_account_switch:true,steam_id64:maskedInputValue(steamId),steam_web_api_key: maskedInputValue(qs('#steamApiKey')?.value),backpack_tf_access_token: maskedInputValue(qs('#backpackAccessToken')?.value),backpack_tf_api_key: maskedInputValue(qs('#backpackApiKey')?.value),...extra};
+    const rawPayload={account_id:accountId,id:'main',role:selectedRole,make_active:true,force_main_account_switch:true};
+    const steamIdVal=maskedInputValue(steamId); if(steamIdVal)rawPayload.steam_id64=steamIdVal;
+    const steamApiVal=maskedInputValue(qs('#steamApiKey')?.value); if(steamApiVal)rawPayload.steam_web_api_key=steamApiVal;
+    const backpackTokenVal=maskedInputValue(qs('#backpackAccessToken')?.value); if(backpackTokenVal)rawPayload.backpack_tf_access_token=backpackTokenVal;
+    const backpackApiVal=maskedInputValue(qs('#backpackApiKey')?.value); if(backpackApiVal)rawPayload.backpack_tf_api_key=backpackApiVal;
+    const payload={...rawPayload,...extra};
     const started=performance.now();
     const data=await api('/api/main-account/save',{method:'POST',body:JSON.stringify(payload),timeoutMs:10000});
     const status=await api('/api/main-account/status',{timeoutMs:10000}).catch(()=>data);
@@ -976,7 +999,7 @@ function renderLocalWorkflow(data){
 function renderPublishWizard(data){
   const el=document.getElementById('publishWizard');if(!el)return;
   if(!data||data.error){el.innerHTML=`<p class="muted">${esc2(data&&data.error||'No production dashboard data yet.')}</p>`;return;}
-  if(data.version&&data.ok&&data.steps===undefined&&data.candidate_draft_id===undefined&&data.classifieds_maintainer===undefined){el.innerHTML=`<p class="badText"><b>Production dashboard data mapping mismatch.</b> Refresh response was not /api/publish-wizard/status. Update to 5.13.43 or reload with Ctrl+F5.</p><pre>${esc2(JSON.stringify(data,null,2).slice(0,1000))}</pre>`;return;}
+  if(data.version&&data.ok&&data.steps===undefined&&data.candidate_draft_id===undefined&&data.classifieds_maintainer===undefined){el.innerHTML=`<p class="badText"><b>Production dashboard data mapping mismatch.</b> Refresh response was not /api/publish-wizard/status. Update to 5.13.44 or reload with Ctrl+F5.</p><pre>${esc2(JSON.stringify(data,null,2).slice(0,1000))}</pre>`;return;}
   const maint=data.classifieds_maintainer||{};
   const autoSell=data.auto_sell_relister||{};
   const manualOwnedSell=data.manual_owned_sell_detector||{};
