@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const APP_VERSION = '5.13.45';
+const APP_VERSION = '5.13.46';
 const APP_NAME = 'TF2 Trading Hub';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -105,6 +105,16 @@ const TRADE_ACCEPT_LOG_PATH = path.join(DATA_DIR, 'steam-companion-trade-accept-
 const BACKUP_DIR = path.join(DATA_DIR, 'steam-companion-backups');
 const DATA_SCHEMA_VERSION = 51300;
 let __saveInProgress = false;
+let __maintainerRunning = false;
+const runtimeState = {
+  statusSnapshot: null,
+  statusBuiltAt: 0,
+  maintainerLastError: null,
+  maintainerLastCompletedAt: null,
+  maintainerLastStartedAt: null,
+  publishWizardSnapshot: null,
+  publishWizardBuiltAt: 0,
+};
 const BLOCKED_TERMS = [];
 const ACCOUNT_ROLE_DEFINITIONS = {
   main: {
@@ -12768,11 +12778,27 @@ async function handleApi(req, res, pathname) {
   if (pathname === '/api/status') {
     const options = getOptions();
     const state = readJson(STATE_PATH, {});
+    // 5.13.46: Fast cached status — no heavy rebuilds, no maintainer.status() call.
+    // Read the last persisted maintainer state directly from disk (one JSON read, cheap).
+    const maintainerFile = readJson(CLASSIFIEDS_MAINTAINER_PATH, { ok: true, enabled: false, running: false });
+    const maintainerCached = {
+      ok: maintainerFile.ok !== false,
+      enabled: Boolean(maintainerFile.enabled),
+      running: __maintainerRunning || Boolean(maintainerFile.running),
+      last_run_at: maintainerFile.last_run_at || null,
+      last_result_summary: maintainerFile.last_result ? { ok: maintainerFile.last_result.ok !== false, published: maintainerFile.last_result.counters ? maintainerFile.last_result.counters.published : 0, errors: maintainerFile.last_result.counters ? maintainerFile.last_result.counters.errors : 0, health: maintainerFile.last_result.health || 'unknown', completed_at: maintainerFile.last_result.completed_at || null } : null,
+      maintainer_running: __maintainerRunning,
+      last_error: runtimeState.maintainerLastError || null,
+      note: 'fast_cached'
+    };
+    // Consolidate SteamGuard status into a single call.
+    let sgStatus = { has_session: false, loaded: false };
+    try { sgStatus = new SteamGuardModule(auditService).status(); } catch {}
     return json(res, 200, {
       ok: true,
       app: APP_NAME,
       version: APP_VERSION,
-      scope: '5.13.29 – Production Dashboard Cleanup',
+      scope: '5.13.46 – Maintainer Crash Isolation + Fast Status API',
       mode: 'operations_cockpit_notifications_persistence_listing_engine_targeted_orders_multi_account_strategy_ollama',
       steam_web_api_key_saved: Boolean(options.steam_web_api_key),
       steam_web_api_key: redacted(options.steam_web_api_key),
@@ -12785,7 +12811,7 @@ async function handleApi(req, res, pathname) {
       backpack_tf_token_saved: Boolean(options.backpack_tf_access_token || options.backpack_tf_api_key),
       backpack_tf_write_mode: options.backpack_tf_write_mode,
       live_classifieds_writes_enabled: Boolean(options.allow_live_classifieds_writes),
-      persistent_classifieds_maintainer: classifiedsMaintainer.status(),
+      persistent_classifieds_maintainer: maintainerCached,
       notification_center_enabled: options.notification_center_enabled,
       operations_cockpit_enabled: options.operations_cockpit_enabled,
       data_schema_version: DATA_SCHEMA_VERSION,
@@ -12800,7 +12826,8 @@ async function handleApi(req, res, pathname) {
       runtime_event_logging: { enabled: options.runtime_event_logging_enabled, debug: options.runtime_debug_logging, level: options.runtime_log_level },
       last_review_at: state.last_review_at || null,
       prepared_offer: state.prepared_offer || null,
-      safety: { steamguard_embedded: options.steamguard_embedded, steamguard_auto_confirm: options.steamguard_embedded && (options.steamguard_auto_confirm || options.trade_approval_mode === 'accept_and_confirm'), steamguard_confirm_delay_seconds: options.steamguard_confirm_delay_seconds, steamguard_status: new SteamGuardModule(auditService).status(), sda_enabled: options.sda_enabled, sda_auto_confirm: !options.steamguard_embedded && options.sda_enabled && (options.sda_auto_confirm || options.trade_approval_mode === 'accept_and_confirm'), sda_base_url: (!options.steamguard_embedded && options.sda_enabled) ? options.sda_base_url : null, stores_cookies: new SteamGuardModule(auditService).status().has_session, stores_guard_secrets: new SteamGuardModule(auditService).status().loaded, auto_accepts_offers: options.auto_accept_enabled || options.trade_approval_mode === 'accept_recommended' || options.trade_approval_mode === 'accept_and_confirm', auto_accept_received_only: options.auto_accept_received_only, auto_confirms_trades: (options.steamguard_embedded && (options.steamguard_auto_confirm || options.trade_approval_mode === 'accept_and_confirm')) || (!options.steamguard_embedded && options.sda_enabled && options.sda_auto_confirm), final_confirmation: options.steamguard_embedded ? ((options.steamguard_auto_confirm || options.trade_approval_mode === 'accept_and_confirm') ? 'embedded_legacy_auto' : 'embedded_legacy_manual') : ((options.sda_enabled && options.sda_auto_confirm) ? 'sda_auto' : 'manual_only') }
+      safety: { steamguard_embedded: options.steamguard_embedded, steamguard_auto_confirm: options.steamguard_embedded && (options.steamguard_auto_confirm || options.trade_approval_mode === 'accept_and_confirm'), steamguard_confirm_delay_seconds: options.steamguard_confirm_delay_seconds, steamguard_status: sgStatus, sda_enabled: options.sda_enabled, sda_auto_confirm: !options.steamguard_embedded && options.sda_enabled && (options.sda_auto_confirm || options.trade_approval_mode === 'accept_and_confirm'), sda_base_url: (!options.steamguard_embedded && options.sda_enabled) ? options.sda_base_url : null, stores_cookies: sgStatus.has_session, stores_guard_secrets: sgStatus.loaded, auto_accepts_offers: options.auto_accept_enabled || options.trade_approval_mode === 'accept_recommended' || options.trade_approval_mode === 'accept_and_confirm', auto_accept_received_only: options.auto_accept_received_only, auto_confirms_trades: (options.steamguard_embedded && (options.steamguard_auto_confirm || options.trade_approval_mode === 'accept_and_confirm')) || (!options.steamguard_embedded && options.sda_enabled && options.sda_auto_confirm), final_confirmation: options.steamguard_embedded ? ((options.steamguard_auto_confirm || options.trade_approval_mode === 'accept_and_confirm') ? 'embedded_legacy_auto' : 'embedded_legacy_manual') : ((options.sda_enabled && options.sda_auto_confirm) ? 'sda_auto' : 'manual_only') },
+      status_built_ms: Date.now()
     });
   }
   if (pathname === '/api/version-audit') return json(res, 200, buildVersionAudit());
@@ -13567,12 +13594,30 @@ async function handleApi(req, res, pathname) {
   }
   if (pathname === '/api/publish-wizard/prepare-key-to-metal' && (req.method === 'POST' || req.method === 'GET')) return json(res, 200, prepareKeyToMetalDraft(getOptions(), auditService));
   if (pathname === '/api/most-traded/status' || pathname === '/api/offer-booster/status' || pathname === '/api/auto-list-anything/status') return json(res, 200, buildMostTradedAndKeysStatus(getOptions()));
-  // 5.13.42: cached status + lite polling endpoint.  Lite is small and skips
-  // every heavy sub-status; it is what the live dashboard polls every few
-  // seconds.  The full /status response is served from a short-TTL memory cache
-  // (PUBLISH_WIZARD_CACHE_TTL_MS) so opening the panel does not peg CPU.
+  // 5.13.46: lite endpoint is always fast; full /status returns cached-only snapshot.
+  // Heavy rebuild must be explicitly requested via POST /api/publish-wizard/rebuild.
   if (pathname === '/api/publish-wizard/status/lite') { try { return json(res, 200, buildPublishWizardLiteStatus()); } catch (error) { return json(res, 200, { ok: true, lite: true, version: APP_VERSION, updated_at: new Date().toISOString(), safe_fallback: true, error: safeError(error) }); } }
-  if (pathname === '/api/publish-wizard/status') { try { return json(res, 200, getCachedPublishWizardStatus()); } catch (error) { return json(res, 200, { ok: true, version: APP_VERSION, updated_at: new Date().toISOString(), safe_fallback: true, error: safeError(error), classifieds_maintainer: { ok: false, error: 'status unavailable' }, auto_sell_relister: { ok: false, error: 'status unavailable' }, trade_offer_state_machine: { ok: false, counts: {}, states: [], next_action: 'Status fallback: dashboard recovered from a server-side status error.' }, steps: [], guarded_publish_enabled: Boolean(getOptions().allow_guarded_backpack_publish), live_classifieds_writes_enabled: Boolean(getOptions().allow_live_classifieds_writes), backpack_tf_write_mode: getOptions().backpack_tf_write_mode, publish_disabled_reason: 'Status fallback active. Run diagnostics if this repeats.' }); } }
+  if (pathname === '/api/publish-wizard/status') {
+    // Return the cached snapshot only. If no cache exists yet, return a safe empty structure.
+    const options = getOptions();
+    const cached = __publishWizardCache.result;
+    if (cached) {
+      return json(res, 200, { ...cached, cached: true, cache_age_ms: Date.now() - __publishWizardCache.builtAt, maintainer_running: __maintainerRunning });
+    }
+    return json(res, 200, { ok: true, version: APP_VERSION, updated_at: new Date().toISOString(), cached: false, maintainer_running: __maintainerRunning, steps: [], guarded_publish_enabled: Boolean(options.allow_guarded_backpack_publish), live_classifieds_writes_enabled: Boolean(options.allow_live_classifieds_writes), backpack_tf_write_mode: options.backpack_tf_write_mode, publish_disabled_reason: 'Dashboard status not built yet. Click Rebuild to load.', classifieds_maintainer: { ok: true, running: __maintainerRunning, enabled: classifiedsMaintainer.enabled(options), note: 'pre_build_lite' }, auto_sell_relister: { ok: true, note: 'pre_build_lite' }, trade_offer_state_machine: { ok: true, counts: {}, states: [], next_action: 'Status will be available after first rebuild.' } });
+  }
+  if (pathname === '/api/publish-wizard/rebuild' && (req.method === 'POST' || req.method === 'GET')) {
+    // 5.13.46: Only this endpoint does the heavy publish wizard status rebuild.
+    const rebuildTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('publish_wizard_rebuild_timeout_30s')), 30000));
+    try {
+      const result = await Promise.race([Promise.resolve().then(() => getCachedPublishWizardStatus()), rebuildTimeout]);
+      return json(res, 200, { ...result, rebuilt: true });
+    } catch (error) {
+      runtimeLogger.error('publish_wizard', 'publish_wizard_rebuild_failed', 'Publish wizard rebuild failed', runtimeErrorContext(error));
+      const options = getOptions();
+      return json(res, 200, { ok: false, version: APP_VERSION, updated_at: new Date().toISOString(), safe_fallback: true, rebuilt: false, error: safeError(error), steps: [], guarded_publish_enabled: Boolean(options.allow_guarded_backpack_publish), live_classifieds_writes_enabled: Boolean(options.allow_live_classifieds_writes), backpack_tf_write_mode: options.backpack_tf_write_mode, publish_disabled_reason: 'Status rebuild failed. Run diagnostics if this repeats.' });
+    }
+  }
   if (pathname === '/api/publish-wizard/prepare-one' && req.method === 'POST') {
     const queue = new PlanningQueueService(auditService);
     let q = queue.current();
@@ -13638,18 +13683,12 @@ async function handleApi(req, res, pathname) {
     // still in progress.  Start manual runs in the background and return an
     // immediate accepted status.  The live dashboard poll then reads the run
     // result from /api/classifieds-maintainer/status.
-    const before = classifiedsMaintainer.status();
-    if (before.running) {
-      return json(res, 202, { ok: true, version: APP_VERSION, accepted_async: false, already_running: true, message: 'Maintainer is already running. Dashboard will refresh automatically.', maintainer: before });
+    if (__maintainerRunning) {
+      return json(res, 202, { ok: true, version: APP_VERSION, accepted_async: false, already_running: true, message: 'Maintainer is already running. Dashboard will refresh automatically.' });
     }
     const acceptedAt = new Date().toISOString();
-    setTimeout(() => {
-      classifiedsMaintainer.run('manual_ui_async').catch(error => {
-        auditService.write('manual_async_maintainer_failed', { message: safeError(error), accepted_at: acceptedAt });
-        appendActionFeed('manual_async_maintainer_failed', { error: safeError(error), accepted_at: acceptedAt });
-      });
-    }, 25);
-    return json(res, 202, { ok: true, version: APP_VERSION, accepted_async: true, accepted_at: acceptedAt, message: 'Maintainer run accepted and started in the background. Watch dashboard live status for progress/results.', maintainer: classifiedsMaintainer.status() });
+    setTimeout(() => { runMaintainerIsolated('manual_ui_async').catch(() => {}); }, 25);
+    return json(res, 202, { ok: true, version: APP_VERSION, accepted_async: true, accepted_at: acceptedAt, message: 'Maintainer run accepted and started in the background. Watch dashboard live status for progress/results.' });
   }
 
   if (pathname === '/api/startup-rebuild/status') return json(res, 200, new StartupRebuildControllerService(auditService).current());
@@ -13688,6 +13727,54 @@ async function handle(req, res) {
   }
   try { return isApi ? await handleApi(req, res, pathname) : serveStatic(res, pathname); } catch (error) { runtimeLogger.error('api', 'api_request_failed', 'API request failed', runtimeErrorContext(error, { requestId, method: req.method, path: pathname, durationMs: Date.now() - requestStartedAt })); audit('server_error', { path: pathname, message: safeError(error) }); return json(res, 500, { ok: false, error: 'Internal server error.' }); }
 }
+async function runMaintainerIsolated(reason = 'scheduled_classifieds_maintainer') {
+  if (__maintainerRunning) {
+    runtimeLogger.info('maintainer', 'maintainer_skipped_already_running', 'Maintainer skipped: already running', { reason });
+    audit('maintainer_skipped_already_running', { reason });
+    return { ok: false, skipped: true, reason: 'already_running' };
+  }
+  __maintainerRunning = true;
+  runtimeState.maintainerLastStartedAt = new Date().toISOString();
+  runtimeState.maintainerLastError = null;
+  const startedAt = Date.now();
+  runtimeLogger.info('maintainer', 'maintainer_started', 'Maintainer run started', { reason, started_at: runtimeState.maintainerLastStartedAt });
+  audit('maintainer_started', { reason });
+  appendActionFeed('maintainer_started', { reason, started_at: runtimeState.maintainerLastStartedAt });
+  const MAINTAINER_TIMEOUT_MS = 90000;
+  const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('maintainer_timeout_90s')), MAINTAINER_TIMEOUT_MS));
+  let result;
+  try {
+    result = await Promise.race([
+      classifiedsMaintainer.run(reason),
+      timeoutPromise
+    ]);
+    runtimeState.maintainerLastCompletedAt = new Date().toISOString();
+    runtimeState.maintainerLastError = null;
+    runtimeLogger.info('maintainer', 'maintainer_completed', 'Maintainer run completed', { reason, elapsed_ms: Date.now() - startedAt, ok: Boolean(result && result.ok), published: result && result.counters ? result.counters.published : 0 });
+    audit('maintainer_completed', { reason, elapsed_ms: Date.now() - startedAt, ok: Boolean(result && result.ok) });
+    appendActionFeed('maintainer_completed', { reason, elapsed_ms: Date.now() - startedAt, ok: Boolean(result && result.ok) });
+  } catch (error) {
+    const isTimeout = error && error.message === 'maintainer_timeout_90s';
+    const errSafe = safeError(error);
+    runtimeState.maintainerLastError = { error: errSafe, at: new Date().toISOString(), timed_out: isTimeout };
+    runtimeState.maintainerLastCompletedAt = new Date().toISOString();
+    runtimeLogger.error('maintainer', isTimeout ? 'maintainer_timeout' : 'maintainer_failed', isTimeout ? 'Maintainer timed out after 90s' : 'Maintainer failed with error', { reason, elapsed_ms: Date.now() - startedAt, error: errSafe, timed_out: isTimeout });
+    audit(isTimeout ? 'maintainer_timeout' : 'maintainer_failed', { reason, elapsed_ms: Date.now() - startedAt, error: errSafe });
+    appendActionFeed(isTimeout ? 'maintainer_timeout' : 'maintainer_failed', { reason, elapsed_ms: Date.now() - startedAt, error: errSafe });
+    try { writeCrashReport(isTimeout ? 'maintainer_timeout' : 'maintainer_failed', error, { reason, elapsed_ms: Date.now() - startedAt }); } catch {}
+    try {
+      const state = readJson(CLASSIFIEDS_MAINTAINER_PATH, { runs: [] });
+      const failEntry = { ok: false, version: APP_VERSION, reason, started_at: runtimeState.maintainerLastStartedAt, completed_at: runtimeState.maintainerLastCompletedAt, timed_out: isTimeout, error: errSafe, health: 'error', next_action: 'Maintainer failed. Check tf2-hub-last-crash.json for details.' };
+      const runs = [...(Array.isArray(state.runs) ? state.runs : []), failEntry].slice(-50);
+      writeJson(CLASSIFIEDS_MAINTAINER_PATH, { ok: false, version: APP_VERSION, running: false, last_run_at: failEntry.completed_at, last_result: failEntry, runs });
+    } catch {}
+    result = { ok: false, error: errSafe, timed_out: isTimeout };
+  } finally {
+    __maintainerRunning = false;
+  }
+  return result;
+}
+
 function startScheduler() {
   const startedAt = Date.now();
   globalThis.__tf2HubStartedAt = startedAt;
@@ -13708,7 +13795,7 @@ function startScheduler() {
         }
         if (classifiedsMaintainer.due()) {
           runtimeLogger.info('scheduler', 'scheduler_job_running', 'Scheduler running job', { job: 'scheduled_classifieds_maintainer' });
-          await classifiedsMaintainer.run('scheduled_classifieds_maintainer').catch(error => { runtimeLogger.error('scheduler', 'scheduler_job_failed', 'Scheduler job failed', { job: 'scheduled_classifieds_maintainer', error: safeError(error) }); audit('scheduled_classifieds_maintainer_failed', { message: safeError(error) }); });
+          await runMaintainerIsolated('scheduled_classifieds_maintainer');
         }
         runtimeLogger.info('scheduler', 'scheduler_tick_completed', 'Scheduler tick completed', { elapsed_ms: Date.now() - tickStart });
       } catch (error) {
@@ -13746,5 +13833,5 @@ __server.listen(PORT, HOST, () => {
     runtimeLogger.error('startup', 'vault_loaded_failed', 'Main account vault startup status failed', runtimeErrorContext(error));
   }
   runtimeLogger.info('startup', 'config_loaded', 'Runtime options loaded', runtimeLoggerOptions());
-  console.log(`[tf2-hub] ${APP_VERSION} Fast local-only main account save; hard 1500ms timeout; scheduler skips during save`);
+  console.log(`[tf2-hub] ${APP_VERSION} Maintainer crash isolation + fast status API`);
 });

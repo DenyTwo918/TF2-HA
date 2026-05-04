@@ -1,6 +1,6 @@
 {
   "name": "tf2-trading-hub-addon",
-  "version": "5.13.45",
+  "version": "5.13.46",
   "private": true,
   "main": "dist/server.js",
   "scripts": {
@@ -8,5 +8,5 @@
     "start": "node dist/server.js"
   },
   "dependencies": {},
-  "description": "TF2 Trading Hub: Fast local-only main account save, hard 1500ms timeout, save-in-progress scheduler guard."
+  "description": "TF2 Trading Hub: Maintainer crash isolation, 90s hard timeout, fast /api/status and /api/publish-wizard/status."
 }
