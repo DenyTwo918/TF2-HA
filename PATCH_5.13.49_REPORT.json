@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "version": "5.13.49",
+  "name": "Trade State d Reference Fix",
+  "fixed": [
+    "scheduled pipeline crash: d is not defined",
+    "sell draft trade-state mapping now uses draft variable consistently"
+  ],
+  "preserved": [
+    "main account persistence",
+    "Backpack.tf token/API key split",
+    "single-flight operation lock",
+    "guarded/manual safety defaults"
+  ]
+}

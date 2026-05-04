@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "version": "5.13.49",
+  "title": "Trade State d Reference Fix",
+  "notes": [
+    "Full ZIP generated from 5.13.47 full package",
+    "All Home Assistant visible version markers bumped",
+    "No credential vault logic changed",
+    "No Backpack token/API key logic changed",
+    "Maintainer start no longer calls heavy status synchronously",
+    "Operation draining state prevents new heavy work while old provider sync drains after timeout"
+  ],
+  "acceptance": [
+    "node --check dist/server.js",
+    "node --check dist/index.js",
+    "grep version markers"
+  ]
+}
