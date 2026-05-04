@@ -108,6 +108,10 @@ Adds a Backpack.tf listing verification endpoint, automatic post-publish verific
 The maintainer can now auto-fill buy listing slots toward `target_active_buy_listings` while keeping a default stock cap of one item per SKU. Existing active buy listings, owned items, active sell listings and good incoming offers prevent another buy listing for the same item.
 
 
+## 5.13.47 – Operation Single-Flight Lock + Maintainer Queue Fix
+
+Adds a central runtime operation coordinator, `/api/operations/status`, provider sync de-duplication, scheduler busy-skips, maintainer busy-skips and dashboard button locking so heavy Backpack.tf workflows do not overlap. Credential vault and trading safety defaults are unchanged.
+
 ## 5.13.46 – Maintainer Crash Isolation + Fast Status API
 
 `GET /api/status` is now fully fast (no `classifiedsMaintainer.status()` rebuild, no triple SteamGuardModule calls — single JSON read + one SteamGuard call). `GET /api/publish-wizard/status` returns cached snapshot only; returns safe empty structure if no cache exists. Heavy publish wizard rebuild moved to `POST /api/publish-wizard/rebuild` with 30s timeout. `scheduled_classifieds_maintainer` is now wrapped in `runMaintainerIsolated()`: global `__maintainerRunning` mutex, 90s `Promise.race` hard timeout, full try/catch, writes `tf2-hub-last-crash.json` on failure, emits `maintainer_started` / `maintainer_completed` / `maintainer_timeout` / `maintainer_failed` / `maintainer_skipped_already_running` action feed events. Process never exits on maintainer failure. Manual maintainer run endpoint also uses `runMaintainerIsolated`. `runtimeState` global tracks last error and timestamps.

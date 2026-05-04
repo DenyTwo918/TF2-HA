@@ -1,7 +1,7 @@
 ARG BUILD_ARCH=amd64
 FROM ghcr.io/home-assistant/${BUILD_ARCH}-base:latest
 
-ARG BUILD_VERSION=5.13.43
+ARG BUILD_VERSION=5.13.47
 ARG BUILD_ARCH=amd64
 
 LABEL io.hass.name="TF2 Trading Hub" \
