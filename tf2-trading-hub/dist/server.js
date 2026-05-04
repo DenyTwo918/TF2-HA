@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const APP_VERSION = '5.13.50';
+const APP_VERSION = '5.13.51';
 const APP_NAME = 'TF2 Trading Hub';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -106,6 +106,7 @@ const BACKUP_DIR = path.join(DATA_DIR, 'steam-companion-backups');
 const DATA_SCHEMA_VERSION = 51300;
 let __saveInProgress = false;
 let __maintainerRunning = false;
+let __lastMaintainerTimeoutAt = 0;
 const runtimeState = {
   statusSnapshot: null,
   statusBuiltAt: 0,
@@ -475,6 +476,8 @@ function operationPublicSnapshot(op) {
     activeOperationAgeMs: ageMs,
     activeOperationRemainingMs: active ? remainingMs : 0,
     expired,
+    aborted: active ? Boolean(op.abort_controller && op.abort_controller.signal && op.abort_controller.signal.aborted) : false,
+    last_heartbeat_at: active ? (op.last_heartbeat_at || op.started_at || null) : null,
     last_stage: active ? (op.last_stage || 'running') : null,
     lastStage: active ? (op.last_stage || 'running') : null,
     reason: active ? (op.reason || null) : null,
@@ -534,6 +537,42 @@ function operationDrainingPayload(requestedType, reason) {
   };
 }
 function yieldToEventLoop() { return new Promise(resolve => setImmediate(resolve)); }
+function assertOperationStillAlive(operationId, stage) {
+  if (!operationId) return;
+  if (!__activeOperation || !__activeOperation.active || __activeOperation.id !== operationId) {
+    throw new Error(`operation_no_longer_active_at_${String(stage || 'unknown')}`);
+  }
+  if (__activeOperation.timed_out || __activeOperation.stale_released) {
+    throw new Error(`operation_timed_out_at_${String(stage || 'unknown')}`);
+  }
+}
+// 5.13.51 – Independent 2-second watchdog (not scheduler-dependent)
+let __operationWatchdogInterval = null;
+function startOperationWatchdog() {
+  if (__operationWatchdogInterval) return;
+  __operationWatchdogInterval = setInterval(() => {
+    try {
+      if (!__activeOperation || !__activeOperation.active) return;
+      if (isOperationExpired()) {
+        releaseStaleOperationIfNeeded('operation_watchdog_released_stale_lock');
+        return;
+      }
+      const hb = __activeOperation.last_heartbeat_at;
+      if (hb) {
+        const staleMs = Date.now() - new Date(hb).getTime();
+        if (staleMs > 30000) {
+          try { logOperationEvent('operation_heartbeat_stale', { operationId: __activeOperation.id, type: __activeOperation.type, heartbeatAgeMs: staleMs, last_heartbeat_at: hb }, 'warn'); } catch {}
+          releaseStaleOperationIfNeeded('operation_heartbeat_stale');
+        }
+      }
+    } catch {}
+  }, 2000);
+  try { __operationWatchdogInterval.unref && __operationWatchdogInterval.unref(); } catch {}
+}
+function withStageTimeout(label, ms, fn) {
+  const t = new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error(`${label}_timeout_${Math.round(ms / 1000)}s`)), ms); try { timer.unref && timer.unref(); } catch {}; });
+  return Promise.race([Promise.resolve().then(fn), t]);
+}
 function throwIfOperationAborted(signal = null, stage = 'operation') {
   const aborted = Boolean((signal && signal.aborted) || (__activeOperation && __activeOperation.timed_out));
   if (!aborted) return;
@@ -594,6 +633,7 @@ function markOperationStage(stage, extra = {}) {
   if (!__activeOperation) return;
   __activeOperation.last_stage = String(stage || 'running');
   __activeOperation.last_stage_at = nowIso();
+  __activeOperation.last_heartbeat_at = nowIso();
   if (extra && typeof extra === 'object') __activeOperation.last_stage_detail = runtimeRedactValue('operation_stage', extra);
   persistOperationState();
 }
@@ -626,6 +666,7 @@ function beginOperation(type, reason, options = {}) {
     deadline_at: new Date(deadlineAtMs).toISOString(),
     last_stage: 'started',
     last_stage_at: nowIso(),
+    last_heartbeat_at: nowIso(),
     abort_controller: controller,
     promise: null
   };
@@ -1894,7 +1935,7 @@ function getOptions() {
     backpack_tf_enabled: bool(options.backpack_tf_enabled, true),
     backpack_tf_access_token: String(credentialAccount.backpack_tf_access_token || options.backpack_tf_access_token || '').trim(),
     backpack_tf_api_key: String(credentialAccount.backpack_tf_api_key || options.backpack_tf_api_key || '').trim(),
-    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.50').trim(),
+    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.51').trim(),
     backpack_tf_base_url: String(options.backpack_tf_base_url || 'https://backpack.tf').replace(/\/$/, ''),
     backpack_tf_cache_ttl_minutes: clamp(options.backpack_tf_cache_ttl_minutes, 30, 1, 1440),
     backpack_tf_retry_count: clamp(options.backpack_tf_retry_count, 2, 0, 5),
@@ -3567,7 +3608,7 @@ class BackpackTfV2ListingManager {
     return configured.endsWith('/api') ? configured : `${configured}/api`;
   }
   headers(authMode = 'token') {
-    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.50' };
+    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.51' };
     if (authMode === 'token' && this.options.backpack_tf_access_token) headers['X-Auth-Token'] = this.options.backpack_tf_access_token;
     if (authMode === 'bearer' && this.options.backpack_tf_access_token) headers.authorization = `Bearer ${this.options.backpack_tf_access_token}`;
     if (authMode === 'api_key_header' && this.options.backpack_tf_api_key) headers['x-api-key'] = this.options.backpack_tf_api_key;
@@ -8240,7 +8281,7 @@ class SteamInventorySyncService {
       let accepted = null;
       let lastFailure = null;
       for (const variant of this.inventoryUrls(options.steam_id64, startAssetId)) {
-        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.50' } });
+        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.51' } });
         const body = result.body || {};
         const parsed = result.ok ? this.extractInventoryPayload(body) : { ok: false, error: result.error || body.error || body.raw || `HTTP ${result.status}` };
         attempts.push({
@@ -11971,7 +12012,7 @@ class PersistentClassifiedsMaintainerService {
       }
       const listingManager = new BackpackTfV2ListingManager(options, this.audit);
       throwIfOperationAborted(context && context.signal, 'maintainer_before_provider_sync');
-      const sync = await listingManager.syncListings(true);
+      const sync = await withStageTimeout('maintainer_provider_sync', 20000, () => listingManager.syncListings(true));
       throwIfOperationAborted(context && context.signal, 'maintainer_after_provider_sync');
       result.steps.push({ stage: 'sync_account_listings', ok: Boolean(sync.ok), listings: Number(sync.listings_count || 0), error: sync.error || null });
 
@@ -12027,14 +12068,17 @@ class PersistentClassifiedsMaintainerService {
         const shouldRefillQueue = !Array.isArray(q.items) || !q.items.length || queueItemsBefore < Math.min(200, minimumUsefulQueue);
         if (shouldRefillQueue) {
           try {
-            const scanner = new MarketTargetScannerService(this.audit).build(options);
+            await yieldToEventLoop(); throwIfOperationAborted(context && context.signal, 'maintainer_refill_scanner');
+            const scanner = await withStageTimeout('maintainer_candidate_build', 15000, () => new MarketTargetScannerService(this.audit).build(options));
             result.steps.push({ stage: 'refill_market_scanner_for_cap', ok: Boolean(scanner.ok), candidates: Number(scanner.summary?.total_candidates || (scanner.candidates || []).length || 0), queue_items_before: queueItemsBefore, missing_buy: Number(targetsBeforeQueue.missing_buy || 0) });
           } catch (error) {
             result.steps.push({ stage: 'refill_market_scanner_for_cap', ok: false, error: safeError(error), non_blocking: true, queue_items_before: queueItemsBefore });
           }
-          q = queue.rebuild('persistent_classifieds_maintainer_cap_refill');
+          await yieldToEventLoop(); throwIfOperationAborted(context && context.signal, 'maintainer_refill_queue');
+          q = await withStageTimeout('maintainer_queue_rebuild', 15000, () => queue.rebuild('persistent_classifieds_maintainer_cap_refill'));
           result.steps.push({ stage: 'refill_planning_queue_for_cap', ok: Boolean(q.ok), queue_items_after: Array.isArray(q.items) ? q.items.length : 0, minimum_useful_queue: minimumUsefulQueue });
         }
+        await yieldToEventLoop(); throwIfOperationAborted(context && context.signal, 'maintainer_refill_post_queue');
 
         const draftService = new HubListingDraftService(this.audit);
         let draftStore = readJson(HUB_LISTING_DRAFTS_PATH, { ok: true, drafts: [] });
@@ -12129,7 +12173,8 @@ class PersistentClassifiedsMaintainerService {
           writeJson(PLANNING_QUEUE_PATH, { ...current, items, updated_at: now });
         }
 
-        const built = draftService.buildFromApproved('persistent_classifieds_maintainer_auto_top3');
+        await yieldToEventLoop(); throwIfOperationAborted(context && context.signal, 'maintainer_refill_draft_build');
+        const built = await withStageTimeout('maintainer_draft_build', 15000, () => draftService.buildFromApproved('persistent_classifieds_maintainer_auto_top3'));
         let approvedDraftsNow = 0;
         for (const d of (built.drafts || [])) {
           if (d && d.draft_id && d.local_status !== 'approved_local') {
@@ -12141,7 +12186,7 @@ class PersistentClassifiedsMaintainerService {
         return { ok: refreshed.length > 0, candidates: refreshed, approved_queue_items: approvedNow, approved_drafts: approvedDraftsNow, built_drafts: Array.isArray(built.drafts) ? built.drafts.length : 0, needed_before: needed, fill_targets: fillTargets };
       };
 
-      let fill = ensureTopMaintainerDrafts();
+      let fill = await ensureTopMaintainerDrafts();
       candidates = fill.candidates || candidates;
       if (options.maintainer_sell_first_priority_enabled !== false) {
         const sellBacklogNow = maintainerSellFirstBacklog(options);
@@ -12163,8 +12208,17 @@ class PersistentClassifiedsMaintainerService {
 
       const draftService = new HubListingDraftService(this.audit);
       let publishAttempts = 0;
+      const publishLoopStartMs = Date.now();
+      const PUBLISH_LOOP_TIMEOUT_MS = 45000;
       for (const draft of candidates) {
         if (publishAttempts >= maxPublishes) break;
+        if (Date.now() - publishLoopStartMs > PUBLISH_LOOP_TIMEOUT_MS) {
+          try { logOperationEvent('maintainer_publish_loop_timeout', { elapsed_ms: Date.now() - publishLoopStartMs, attempts: publishAttempts }, 'warn'); } catch {}
+          result.steps.push({ stage: 'publish_loop_timeout', ok: false, elapsed_ms: Date.now() - publishLoopStartMs, attempts: publishAttempts });
+          break;
+        }
+        await yieldToEventLoop();
+        throwIfOperationAborted(context && context.signal, 'publish_loop_candidate');
         const candidateId = draft.draft_id;
         result.counters.checked += 1;
         const stockCap = stockCapStatusForDraft(draft, options);
@@ -12207,7 +12261,7 @@ class PersistentClassifiedsMaintainerService {
           verify = { ok: true, listed: false, match_count: 0, skipped_fast_fill: true, source: 'persistent_maintainer_fast_fill_skip_pre_verify' };
           result.steps.push({ stage: 'verify_existing_listing', ok: true, listed: false, skipped_fast_fill: true, draft_id: candidateId });
         } else {
-          verify = await verifyPublishedListing(candidateId, options, this.audit, { forceSync: true, source: 'persistent_maintainer_before_publish' });
+          verify = await withStageTimeout('maintainer_pre_verify', 10000, () => verifyPublishedListing(candidateId, options, this.audit, { forceSync: true, source: 'persistent_maintainer_before_publish' }));
           result.steps.push({ stage: 'verify_existing_listing', ok: Boolean(verify.ok), listed: Boolean(verify.listed), matches: Number(verify.match_count || 0), draft_id: candidateId });
           if (verify.listed) {
             result.counters.already_active += 1;
@@ -12225,8 +12279,8 @@ class PersistentClassifiedsMaintainerService {
           continue;
         }
 
-        if (context && context.signal && context.signal.aborted) throw new Error('maintainer_aborted_before_publish');
         markOperationStage('classifieds_maintainer:publish_loop', { candidateId });
+        if (context && context.signal && context.signal.aborted) throw new Error('maintainer_aborted_before_publish');
         const publish = await draftService.publishGuarded(candidateId, options, { confirm: true, maintainer: true });
         if (publish.provider_request_sent !== false) {
           publishAttempts += 1;
@@ -12257,7 +12311,7 @@ class PersistentClassifiedsMaintainerService {
         if (options.maintainer_verify_after_cycle === false || options.maintainer_skip_per_listing_verify) {
           result.steps.push({ stage: 'verify_after_publish', ok: true, skipped_fast_fill: true, draft_id: candidateId });
         } else {
-          verify = await verifyPublishedListing(candidateId, options, this.audit, { forceSync: true, source: 'persistent_maintainer_after_publish' });
+          verify = await withStageTimeout('maintainer_post_verify', 10000, () => verifyPublishedListing(candidateId, options, this.audit, { forceSync: true, source: 'persistent_maintainer_after_publish' }));
           result.steps.push({ stage: 'verify_after_publish', ok: Boolean(verify.ok), listed: Boolean(verify.listed), matches: Number(verify.match_count || 0), draft_id: candidateId });
         }
       }
@@ -14153,6 +14207,7 @@ async function runMaintainerIsolated(reason = 'scheduled_classifieds_maintainer'
     audit(isTimeout ? 'maintainer_timeout' : 'maintainer_failed', { reason, elapsed_ms: elapsed, error: errSafe });
     appendActionFeed(isTimeout ? 'maintainer_timeout' : 'maintainer_failed', { reason, elapsed_ms: elapsed, error: errSafe });
     if (isTimeout) {
+      __lastMaintainerTimeoutAt = Date.now();
       try { audit('maintainer_timeout_released_lock', { reason, elapsed_ms: elapsed, error: errSafe, owningOperationId }); } catch {}
       try { appendActionFeed('maintainer_timeout_released_lock', { reason, elapsed_ms: elapsed, error: errSafe, owningOperationId }); } catch {}
       // 5.13.50: Hard release the lock if the operation is still held (e.g. event-loop delay caused Promise.race to be late).
@@ -14213,7 +14268,12 @@ function startScheduler() {
         // 5.13.50: second preflight — in case scheduled_pipeline just released the lock via timeout.
         try { releaseStaleOperationIfNeeded('scheduler_preflight_post_pipeline'); } catch {}
         if (classifiedsMaintainer.due()) {
-          if (operationRuntimeBusy()) { const skipped = schedulerBusySkip('scheduled_classifieds_maintainer'); try { audit('maintainer_skipped_busy', { activeOperationType: skipped.operation.activeOperationType, activeOperationAgeMs: skipped.operation.activeOperationAgeMs }); } catch {} }
+          if (__lastMaintainerTimeoutAt && Date.now() - __lastMaintainerTimeoutAt < 600000) {
+            const cooldownMs = Date.now() - __lastMaintainerTimeoutAt;
+            runtimeLogger.warn('scheduler', 'maintainer_skipped_recent_timeout', 'Maintainer skipped: timed out within last 10 minutes', { lastTimeoutAt: new Date(__lastMaintainerTimeoutAt).toISOString(), elapsed_ms: cooldownMs });
+            try { audit('maintainer_skipped_recent_timeout', { lastTimeoutAt: new Date(__lastMaintainerTimeoutAt).toISOString(), elapsed_ms: cooldownMs }); } catch {}
+            try { appendActionFeed('maintainer_skipped_recent_timeout', { elapsed_ms: cooldownMs }); } catch {}
+          } else if (operationRuntimeBusy()) { const skipped = schedulerBusySkip('scheduled_classifieds_maintainer'); try { audit('maintainer_skipped_busy', { activeOperationType: skipped.operation.activeOperationType, activeOperationAgeMs: skipped.operation.activeOperationAgeMs }); } catch {} }
           else if (heavyJobRanThisTick) {
             runtimeLogger.info('scheduler', 'scheduler_tick_heavy_job_limit', 'Scheduler tick heavy job limit reached; deferring scheduled_classifieds_maintainer', { job: 'scheduled_classifieds_maintainer', lastHeavyJobAt: __lastHeavyJobAt });
             try { audit('scheduler_tick_heavy_job_limit', { job: 'scheduled_classifieds_maintainer' }); } catch {}
@@ -14243,6 +14303,7 @@ if (!fs.existsSync(ACTION_FEED_PATH)) writeJson(ACTION_FEED_PATH, { ok: true, up
 if (!fs.existsSync(HUB_SETUP_PATH)) writeJson(HUB_SETUP_PATH, new HubSetupService(auditService).status(null));
 if (!fs.existsSync(TRADING_CORE_PATH)) writeJson(TRADING_CORE_PATH, new TradingCoreService(auditService).build(null));
 try { new DataPersistenceMigrationService(auditService).migrate(); } catch (error) { audit('startup_migration_failed', { message: safeError(error) }); }
+startOperationWatchdog();
 startScheduler();
 const __startupOptions = getOptions();
 runtimeLogger.info('startup', 'startup_jobs_check', 'Startup jobs checked without boot delay gates', { archive_enabled: Boolean(__startupOptions.archive_classifieds_on_startup && __startupOptions.archive_classifieds_on_startup_confirmed), rebuild_enabled: Boolean(__startupOptions.startup_rebuild_enabled) });
