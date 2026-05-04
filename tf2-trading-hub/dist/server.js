@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const APP_VERSION = '5.13.49';
+const APP_VERSION = '5.13.50';
 const APP_NAME = 'TF2 Trading Hub';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -414,16 +414,55 @@ function runtimeLogVaultStatus(action, status = {}, extra = {}) {
 }
 
 
-// ── 5.13.49 – Operation single-flight coordinator ────────────────────────
+// ── 5.13.50 – Operation single-flight coordinator ────────────────────────
 let __activeOperation = null;
 let __providerSyncFlight = null;
 let __drainingOperation = null;
 const OPERATION_DEFAULT_TIMEOUT_MS = 90000;
 const HEAVY_OPERATION_TYPES = new Set(['provider_sync', 'scheduled_pipeline', 'local_workflow', 'classifieds_maintainer', 'publish_wizard_rebuild', 'market_scanner', 'inventory_sync']);
 function nowIso() { return new Date().toISOString(); }
-function operationPublicSnapshot(op = __activeOperation) {
+
+// ── 5.13.50 – Watchdog helpers ────────────────────────────────────────────
+function getOperationAgeMs() {
+  if (!__activeOperation || !__activeOperation.active || !__activeOperation.started_ms) return 0;
+  return Date.now() - __activeOperation.started_ms;
+}
+function isOperationExpired() {
+  if (!__activeOperation || !__activeOperation.active) return false;
+  const deadline = __activeOperation.deadline_at_ms;
+  if (!deadline) return false;
+  return Date.now() > deadline + 5000;
+}
+function releaseStaleOperationIfNeeded(reason) {
+  reason = reason || 'watchdog';
+  if (!__activeOperation || !__activeOperation.active) return false;
+  if (!isOperationExpired()) return false;
+  const op = __activeOperation;
+  const ageMs = getOperationAgeMs();
+  const deadline = op.deadline_at_ms || 0;
+  try { logOperationEvent('operation_stale_detected', { operationId: op.id, type: op.type, ageMs, deadline, reason }, 'warn'); } catch {}
+  try { op.abort_controller && op.abort_controller.abort(new Error('operation_stale_watchdog')); } catch {}
+  op.timed_out = true;
+  op.stale_released = true;
+  clearOperation(op, 'operation_timeout', { ok: false, timed_out: true, stale_released: true, ageMs, reason, error: 'operation_stale_watchdog' });
+  try { logOperationEvent('operation_stale_released', { operationId: op.id, type: op.type, ageMs, reason }, 'warn'); } catch {}
+  if (op.type === 'classifieds_maintainer') {
+    try { logOperationEvent('maintainer_timeout_released_lock', { operationId: op.id, ageMs, reason }, 'warn'); } catch {}
+    try { audit('maintainer_timeout_released_lock', { operationId: op.id, ageMs, reason }); } catch {}
+    try { appendActionFeed('maintainer_timeout_released_lock', { operationId: op.id, ageMs, reason }); } catch {}
+  }
+  return true;
+}
+
+function operationPublicSnapshot(op) {
+  if (op === undefined) op = __activeOperation;
   const active = Boolean(op && op.active);
   const startedMs = op && Number(op.started_ms || 0);
+  const ageMs = active && startedMs ? Date.now() - startedMs : 0;
+  const deadlineAtMs = active && op.deadline_at_ms ? op.deadline_at_ms : 0;
+  const remainingMs = deadlineAtMs ? Math.max(0, deadlineAtMs - Date.now()) : 0;
+  const deadlineAt = deadlineAtMs ? new Date(deadlineAtMs).toISOString() : null;
+  const expired = active && deadlineAtMs ? Date.now() > deadlineAtMs + 5000 : false;
   return {
     ok: true,
     version: APP_VERSION,
@@ -432,8 +471,12 @@ function operationPublicSnapshot(op = __activeOperation) {
     activeOperationId: active ? op.id : null,
     activeOperationType: active ? op.type : null,
     activeOperationStartedAt: active ? op.started_at : null,
-    activeOperationAgeMs: active && startedMs ? Date.now() - startedMs : 0,
+    activeOperationDeadlineAt: active ? deadlineAt : null,
+    activeOperationAgeMs: ageMs,
+    activeOperationRemainingMs: active ? remainingMs : 0,
+    expired,
     last_stage: active ? (op.last_stage || 'running') : null,
+    lastStage: active ? (op.last_stage || 'running') : null,
     reason: active ? (op.reason || null) : null,
     timeout_ms: active ? (op.timeout_ms || 0) : 0,
     lastOperationResult: runtimeState.lastOperationResult || null,
@@ -568,21 +611,27 @@ function beginOperation(type, reason, options = {}) {
   }
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const id = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(8).toString('hex');
+  const startedMs = Date.now();
+  const timeoutMs = Number(options.timeoutMs || OPERATION_DEFAULT_TIMEOUT_MS);
+  const deadlineAtMs = startedMs + timeoutMs;
   __activeOperation = {
     id,
     active: true,
     type,
     reason: reason || type,
     started_at: nowIso(),
-    started_ms: Date.now(),
-    timeout_ms: Number(options.timeoutMs || OPERATION_DEFAULT_TIMEOUT_MS),
+    started_ms: startedMs,
+    timeout_ms: timeoutMs,
+    deadline_at_ms: deadlineAtMs,
+    deadline_at: new Date(deadlineAtMs).toISOString(),
     last_stage: 'started',
     last_stage_at: nowIso(),
     abort_controller: controller,
     promise: null
   };
   persistOperationState();
-  logOperationEvent('operation_started', { operationId: id, type, reason: reason || type, timeout_ms: __activeOperation.timeout_ms });
+  logOperationEvent('operation_started', { operationId: id, type, reason: reason || type, timeout_ms: timeoutMs });
+  try { logOperationEvent('operation_deadline_set', { operationId: id, type, deadline_at: __activeOperation.deadline_at, timeout_ms: timeoutMs }, 'info'); } catch {}
   return { started: true, operation: __activeOperation, signal: controller ? controller.signal : null };
 }
 function clearOperation(op, eventType, result = {}) {
@@ -1845,7 +1894,7 @@ function getOptions() {
     backpack_tf_enabled: bool(options.backpack_tf_enabled, true),
     backpack_tf_access_token: String(credentialAccount.backpack_tf_access_token || options.backpack_tf_access_token || '').trim(),
     backpack_tf_api_key: String(credentialAccount.backpack_tf_api_key || options.backpack_tf_api_key || '').trim(),
-    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.49').trim(),
+    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.50').trim(),
     backpack_tf_base_url: String(options.backpack_tf_base_url || 'https://backpack.tf').replace(/\/$/, ''),
     backpack_tf_cache_ttl_minutes: clamp(options.backpack_tf_cache_ttl_minutes, 30, 1, 1440),
     backpack_tf_retry_count: clamp(options.backpack_tf_retry_count, 2, 0, 5),
@@ -3518,7 +3567,7 @@ class BackpackTfV2ListingManager {
     return configured.endsWith('/api') ? configured : `${configured}/api`;
   }
   headers(authMode = 'token') {
-    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.49' };
+    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.50' };
     if (authMode === 'token' && this.options.backpack_tf_access_token) headers['X-Auth-Token'] = this.options.backpack_tf_access_token;
     if (authMode === 'bearer' && this.options.backpack_tf_access_token) headers.authorization = `Bearer ${this.options.backpack_tf_access_token}`;
     if (authMode === 'api_key_header' && this.options.backpack_tf_api_key) headers['x-api-key'] = this.options.backpack_tf_api_key;
@@ -3786,6 +3835,7 @@ class BackpackTfV2ListingManager {
     return { ok: false, stage: 'prices_empty_or_failed', status: attempts.at(-1)?.status || 0, error: debug.error, attempts };
   }
   async syncListings(force = false) {
+    try { releaseStaleOperationIfNeeded('provider_sync_start'); } catch {}
     if (__providerSyncFlight && __providerSyncFlight.promise) {
       runtimeLogger.info('backpack_tf', 'provider_sync_joined_existing', 'Backpack.tf provider sync joined existing in-flight request', { force: Boolean(force), providerOperationId: __providerSyncFlight.id, activeOperationType: operationPublicSnapshot().activeOperationType });
       try { audit('provider_sync_joined_existing', { providerOperationId: __providerSyncFlight.id, force: Boolean(force) }); } catch {}
@@ -8190,7 +8240,7 @@ class SteamInventorySyncService {
       let accepted = null;
       let lastFailure = null;
       for (const variant of this.inventoryUrls(options.steam_id64, startAssetId)) {
-        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.49' } });
+        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.50' } });
         const body = result.body || {};
         const parsed = result.ok ? this.extractInventoryPayload(body) : { ok: false, error: result.error || body.error || body.raw || `HTTP ${result.status}` };
         attempts.push({
@@ -13056,9 +13106,10 @@ class DiagnosticBundleService {
 
 async function handleApi(req, res, pathname) {
   if (pathname === '/api/status') {
+    try { releaseStaleOperationIfNeeded('status_endpoint'); } catch {}
     const options = getOptions();
     const state = readJson(STATE_PATH, {});
-    // 5.13.49: Fast cached status — no heavy rebuilds, no maintainer.status() call.
+    // 5.13.50: Fast cached status — no heavy rebuilds, no maintainer.status() call.
     // Read the last persisted maintainer state directly from disk (one JSON read, cheap).
     const maintainerFile = readJson(CLASSIFIEDS_MAINTAINER_PATH, { ok: true, enabled: false, running: false });
     const maintainerCached = {
@@ -13078,7 +13129,7 @@ async function handleApi(req, res, pathname) {
       ok: true,
       app: APP_NAME,
       version: APP_VERSION,
-      scope: '5.13.49 – Trade State d Reference Fix',
+      scope: '5.13.50 – Hard Operation Watchdog + Stale Lock Release',
       mode: 'operations_cockpit_notifications_persistence_listing_engine_targeted_orders_multi_account_strategy_ollama',
       steam_web_api_key_saved: Boolean(options.steam_web_api_key),
       steam_web_api_key: redacted(options.steam_web_api_key),
@@ -13511,7 +13562,17 @@ async function handleApi(req, res, pathname) {
   if (pathname === '/api/decisions') return json(res, 200, readJson(DECISIONS_PATH, { ok: false, error: 'No decisions yet.' }));
   if (pathname === '/api/notifications') return json(res, 200, { ok: true, entries: notificationService.list(200) });
   if (pathname === '/api/action-feed') return json(res, 200, readJson(ACTION_FEED_PATH, { ok: true, entries: [] }));
-  if (pathname === '/api/operations/status') return json(res, 200, operationPublicSnapshot());
+  if (pathname === '/api/operations/status') {
+    try { releaseStaleOperationIfNeeded('status_endpoint'); } catch {}
+    return json(res, 200, operationPublicSnapshot());
+  }
+  if (pathname === '/api/operations/release-stale' && (req.method === 'POST' || req.method === 'GET')) {
+    const snap = operationPublicSnapshot();
+    if (!snap.active) return json(res, 200, { ok: true, version: APP_VERSION, released: false, message: 'No active operation.', operation: snap });
+    if (!snap.expired) return json(res, 200, { ok: true, version: APP_VERSION, released: false, message: 'Operation is not yet expired. Wait for natural timeout or use cancel.', operation: snap });
+    const wasReleased = releaseStaleOperationIfNeeded('ui_manual_release');
+    return json(res, 200, { ok: true, version: APP_VERSION, released: wasReleased, message: wasReleased ? 'Stale operation lock released.' : 'No stale operation to release.', operation: operationPublicSnapshot() });
+  }
   if (pathname === '/api/operations/cancel' && (req.method === 'POST' || req.method === 'GET')) {
     if (__activeOperation && __activeOperation.abort_controller) { try { __activeOperation.abort_controller.abort(); } catch {} }
     return json(res, 202, { ok: true, version: APP_VERSION, requested: 'cancel', note: 'Cancellation is cooperative. Live publish requests already sent are not interrupted.', operation: operationPublicSnapshot() });
@@ -13836,6 +13897,7 @@ async function handleApi(req, res, pathname) {
 
   // ── 5.13.29 – Local Workflow ──────────────────────────────────────────
   if (pathname === '/api/workflow/run-local' && req.method === 'POST') {
+    try { releaseStaleOperationIfNeeded('workflow_start'); } catch {}
     if (activeOperationBusy()) {
       const busy = operationBusyPayload('local_workflow', 'manual_run_local');
       runtimeLogger.info('workflow', 'workflow_skipped_busy', 'Local workflow skipped: operation already running', { activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs });
@@ -13890,7 +13952,7 @@ async function handleApi(req, res, pathname) {
   }
   if (pathname === '/api/publish-wizard/prepare-key-to-metal' && (req.method === 'POST' || req.method === 'GET')) return json(res, 200, prepareKeyToMetalDraft(getOptions(), auditService));
   if (pathname === '/api/most-traded/status' || pathname === '/api/offer-booster/status' || pathname === '/api/auto-list-anything/status') return json(res, 200, buildMostTradedAndKeysStatus(getOptions()));
-  // 5.13.49: lite endpoint is always fast; full /status returns cached-only snapshot.
+  // 5.13.50: lite endpoint is always fast; full /status returns cached-only snapshot.
   // Heavy rebuild must be explicitly requested via POST /api/publish-wizard/rebuild.
   if (pathname === '/api/publish-wizard/status/lite') { try { return json(res, 200, buildPublishWizardLiteStatus()); } catch (error) { return json(res, 200, { ok: true, lite: true, version: APP_VERSION, updated_at: new Date().toISOString(), safe_fallback: true, error: safeError(error) }); } }
   if (pathname === '/api/publish-wizard/status') {
@@ -13903,7 +13965,7 @@ async function handleApi(req, res, pathname) {
     return json(res, 200, { ok: true, version: APP_VERSION, updated_at: new Date().toISOString(), cached: false, maintainer_running: __maintainerRunning, operation: operationPublicSnapshot(), active_operation: operationPublicSnapshot(), steps: [], guarded_publish_enabled: Boolean(options.allow_guarded_backpack_publish), live_classifieds_writes_enabled: Boolean(options.allow_live_classifieds_writes), backpack_tf_write_mode: options.backpack_tf_write_mode, publish_disabled_reason: 'Dashboard status not built yet. Click Rebuild to load.', classifieds_maintainer: { ok: true, running: __maintainerRunning, enabled: classifiedsMaintainer.enabled(options), note: 'pre_build_lite' }, auto_sell_relister: { ok: true, note: 'pre_build_lite' }, trade_offer_state_machine: { ok: true, counts: {}, states: [], next_action: 'Status will be available after first rebuild.' } });
   }
   if (pathname === '/api/publish-wizard/rebuild' && (req.method === 'POST' || req.method === 'GET')) {
-    // 5.13.49: Heavy rebuild is single-flight and never overlaps provider/maintainer.
+    // 5.13.50: Heavy rebuild is single-flight and never overlaps provider/maintainer.
     const result = await runExclusiveOperation('publish_wizard_rebuild', 'manual_publish_wizard_rebuild', async () => getCachedPublishWizardStatus(), { timeoutMs: 30000 });
     if (result.busy) return json(res, 202, result);
     if (result.ok && result.result) return json(res, 200, { ...result.result, rebuilt: true, operation: operationPublicSnapshot(), active_operation: operationPublicSnapshot() });
@@ -13976,6 +14038,7 @@ async function handleApi(req, res, pathname) {
     // still in progress.  Start manual runs in the background and return an
     // immediate accepted status.  The live dashboard poll then reads the run
     // result from /api/classifieds-maintainer/status.
+    try { releaseStaleOperationIfNeeded('maintainer_start'); } catch {}
     if (__maintainerRunning || operationRuntimeBusy()) {
       const busy = operationBusyPayload('classifieds_maintainer', 'manual_ui_async');
       runtimeLogger.info('maintainer', 'maintainer_skipped_busy', 'Maintainer skipped: operation already running', { activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs });
@@ -14030,14 +14093,34 @@ async function runMaintainerIsolated(reason = 'scheduled_classifieds_maintainer'
     audit('maintainer_skipped_already_running', { reason });
     return { ok: false, skipped: true, reason: 'already_running' };
   }
+  // 5.13.50: Capture the owning operation token at start so we can detect stale continuation.
+  const owningOperationId = context.operationId || (__activeOperation && __activeOperation.id) || null;
+  function isMaintainerOperationStillActive() {
+    if (!owningOperationId) return true;
+    if (!__activeOperation || !__activeOperation.active) return false;
+    return __activeOperation.id === owningOperationId && !__activeOperation.timed_out && !__activeOperation.stale_released;
+  }
+  function throwIfMaintainerOperationCancelled(stage) {
+    const signal = context && context.signal ? context.signal : null;
+    if (signal && signal.aborted) {
+      try { logOperationEvent('operation_publish_blocked_stale', { stage, operationId: owningOperationId, reason: 'signal_aborted' }, 'warn'); } catch {}
+      throw new Error('operation_cancelled_or_stale');
+    }
+    if (!isMaintainerOperationStillActive()) {
+      try { logOperationEvent('operation_publish_blocked_stale', { stage, operationId: owningOperationId, reason: 'operation_no_longer_active' }, 'warn'); } catch {}
+      throw new Error('operation_cancelled_or_stale');
+    }
+    try { logOperationEvent('operation_abort_checked', { stage, operationId: owningOperationId }, 'info'); } catch {}
+  }
   __maintainerRunning = true;
   runtimeState.maintainerLastStartedAt = new Date().toISOString();
   runtimeState.maintainerLastError = null;
   const startedAt = Date.now();
-  runtimeLogger.info('maintainer', 'maintainer_started', 'Maintainer run started', { reason, started_at: runtimeState.maintainerLastStartedAt });
-  audit('maintainer_started', { reason });
+  runtimeLogger.info('maintainer', 'maintainer_started', 'Maintainer run started', { reason, started_at: runtimeState.maintainerLastStartedAt, owningOperationId });
+  audit('maintainer_started', { reason, owningOperationId });
   appendActionFeed('maintainer_started', { reason, started_at: runtimeState.maintainerLastStartedAt });
   const MAINTAINER_TIMEOUT_MS = 90000;
+  const maintainerDeadlineMs = Date.now() + MAINTAINER_TIMEOUT_MS;
   let __maintainerTimeoutTimer = null;
   const timeoutPromise = new Promise((_, reject) => {
     __maintainerTimeoutTimer = setTimeout(() => {
@@ -14048,8 +14131,10 @@ async function runMaintainerIsolated(reason = 'scheduled_classifieds_maintainer'
   });
   let result;
   try {
+    // Cooperative abort checks before each heavy sub-operation.
+    throwIfMaintainerOperationCancelled('before_provider_sync');
     result = await Promise.race([
-      classifiedsMaintainer.run(reason, { ...context, signal: context && context.signal ? context.signal : currentOperationSignalFor('classifieds_maintainer') }),
+      classifiedsMaintainer.run(reason, { ...context, signal: context && context.signal ? context.signal : currentOperationSignalFor('classifieds_maintainer'), throwIfCancelled: throwIfMaintainerOperationCancelled }),
       timeoutPromise
     ]);
     runtimeState.maintainerLastCompletedAt = new Date().toISOString();
@@ -14058,15 +14143,27 @@ async function runMaintainerIsolated(reason = 'scheduled_classifieds_maintainer'
     audit('maintainer_completed', { reason, elapsed_ms: Date.now() - startedAt, ok: Boolean(result && result.ok) });
     appendActionFeed('maintainer_completed', { reason, elapsed_ms: Date.now() - startedAt, ok: Boolean(result && result.ok) });
   } catch (error) {
-    const isTimeout = error && /maintainer_timeout_90s|classifieds_maintainer_timeout_90s/.test(String(error.message || error));
+    const isCancelledOrStale = error && /operation_cancelled_or_stale/.test(String(error.message || error));
+    const isTimeout = isCancelledOrStale || (error && /maintainer_timeout_90s|classifieds_maintainer_timeout_90s/.test(String(error.message || error)));
+    const elapsed = Date.now() - startedAt;
     const errSafe = safeError(error);
     runtimeState.maintainerLastError = { error: errSafe, at: new Date().toISOString(), timed_out: isTimeout };
     runtimeState.maintainerLastCompletedAt = new Date().toISOString();
-    runtimeLogger.error('maintainer', isTimeout ? 'maintainer_timeout' : 'maintainer_failed', isTimeout ? 'Maintainer timed out after 90s' : 'Maintainer failed with error', { reason, elapsed_ms: Date.now() - startedAt, error: errSafe, timed_out: isTimeout });
-    audit(isTimeout ? 'maintainer_timeout' : 'maintainer_failed', { reason, elapsed_ms: Date.now() - startedAt, error: errSafe });
-    appendActionFeed(isTimeout ? 'maintainer_timeout' : 'maintainer_failed', { reason, elapsed_ms: Date.now() - startedAt, error: errSafe });
-    if (isTimeout) { try { audit('maintainer_timeout_released_lock', { reason, elapsed_ms: Date.now() - startedAt, error: errSafe }); } catch {} try { appendActionFeed('maintainer_timeout_released_lock', { reason, elapsed_ms: Date.now() - startedAt, error: errSafe }); } catch {} }
-    try { writeCrashReport(isTimeout ? 'maintainer_timeout' : 'maintainer_failed', error, { reason, elapsed_ms: Date.now() - startedAt }); } catch {}
+    runtimeLogger.error('maintainer', isTimeout ? 'maintainer_timeout' : 'maintainer_failed', isTimeout ? 'Maintainer timed out after 90s' : 'Maintainer failed with error', { reason, elapsed_ms: elapsed, error: errSafe, timed_out: isTimeout });
+    audit(isTimeout ? 'maintainer_timeout' : 'maintainer_failed', { reason, elapsed_ms: elapsed, error: errSafe });
+    appendActionFeed(isTimeout ? 'maintainer_timeout' : 'maintainer_failed', { reason, elapsed_ms: elapsed, error: errSafe });
+    if (isTimeout) {
+      try { audit('maintainer_timeout_released_lock', { reason, elapsed_ms: elapsed, error: errSafe, owningOperationId }); } catch {}
+      try { appendActionFeed('maintainer_timeout_released_lock', { reason, elapsed_ms: elapsed, error: errSafe, owningOperationId }); } catch {}
+      // 5.13.50: Hard release the lock if the operation is still held (e.g. event-loop delay caused Promise.race to be late).
+      if (__activeOperation && __activeOperation.active && __activeOperation.id === owningOperationId) {
+        try { logOperationEvent('maintainer_timeout_released_lock', { operationId: owningOperationId, elapsed_ms: elapsed, reason: 'hard_release_in_catch' }, 'warn'); } catch {}
+        try { __activeOperation.abort_controller && __activeOperation.abort_controller.abort(); } catch {}
+        __activeOperation.timed_out = true;
+        clearOperation(__activeOperation, 'operation_timeout', { ok: false, timed_out: true, error: errSafe, elapsed_ms: elapsed });
+      }
+    }
+    try { writeCrashReport(isTimeout ? 'maintainer_timeout' : 'maintainer_failed', error, { reason, elapsed_ms: elapsed }); } catch {}
     try {
       const state = readJson(CLASSIFIEDS_MAINTAINER_PATH, { runs: [] });
       const failEntry = { ok: false, version: APP_VERSION, reason, started_at: runtimeState.maintainerLastStartedAt, completed_at: runtimeState.maintainerLastCompletedAt, timed_out: isTimeout, error: errSafe, health: 'error', next_action: 'Maintainer failed. Check tf2-hub-last-crash.json for details.' };
@@ -14086,6 +14183,7 @@ function startScheduler() {
   globalThis.__tf2HubStartedAt = startedAt;
   runtimeLogger.info('startup', 'scheduler_started', 'Runtime scheduler started', { intervalMs: 60000 });
   let tickRunning = false;
+  let __lastHeavyJobAt = 0;
   setInterval(() => {
     if (__saveInProgress) { runtimeLogger.info('scheduler', 'scheduler_skipped_save_in_progress', 'Scheduler tick skipped: credential save in progress'); return; }
     const options = getOptions();
@@ -14095,21 +14193,38 @@ function startScheduler() {
     runtimeLogger.info('scheduler', 'scheduler_tick_started', 'Scheduler tick started', { uptime_seconds: Math.round(process.uptime()) });
     Promise.resolve().then(async () => {
       try {
+        // 5.13.50: preflight watchdog — release stale locks before scheduling any job.
+        try { releaseStaleOperationIfNeeded('scheduler_preflight'); } catch {}
+        let heavyJobRanThisTick = false;
         if (hubAutopilot.due()) {
           if (operationRuntimeBusy()) { schedulerBusySkip('scheduled_pipeline'); }
           else {
-            runtimeLogger.info('scheduler', 'scheduler_job_running', 'Scheduler running job', { job: 'scheduled_pipeline' });
-            await runExclusiveOperation('scheduled_pipeline', 'scheduled_pipeline', async () => hubAutopilot.run('scheduled_pipeline'), { timeoutMs: 90000 }).catch(error => { runtimeLogger.error('scheduler', 'scheduler_job_failed', 'Scheduler job failed', { job: 'scheduled_pipeline', error: safeError(error) }); audit('scheduled_pipeline_failed', { message: safeError(error) }); });
+            if (heavyJobRanThisTick) {
+              runtimeLogger.info('scheduler', 'scheduler_tick_heavy_job_limit', 'Scheduler tick heavy job limit reached; deferring scheduled_pipeline', { job: 'scheduled_pipeline', lastHeavyJobAt: __lastHeavyJobAt });
+              try { audit('scheduler_tick_heavy_job_limit', { job: 'scheduled_pipeline' }); } catch {}
+            } else {
+              heavyJobRanThisTick = true;
+              __lastHeavyJobAt = Date.now();
+              runtimeLogger.info('scheduler', 'scheduler_job_running', 'Scheduler running job', { job: 'scheduled_pipeline' });
+              await runExclusiveOperation('scheduled_pipeline', 'scheduled_pipeline', async () => hubAutopilot.run('scheduled_pipeline'), { timeoutMs: 90000 }).catch(error => { runtimeLogger.error('scheduler', 'scheduler_job_failed', 'Scheduler job failed', { job: 'scheduled_pipeline', error: safeError(error) }); audit('scheduled_pipeline_failed', { message: safeError(error) }); });
+            }
           }
         }
+        // 5.13.50: second preflight — in case scheduled_pipeline just released the lock via timeout.
+        try { releaseStaleOperationIfNeeded('scheduler_preflight_post_pipeline'); } catch {}
         if (classifiedsMaintainer.due()) {
           if (operationRuntimeBusy()) { const skipped = schedulerBusySkip('scheduled_classifieds_maintainer'); try { audit('maintainer_skipped_busy', { activeOperationType: skipped.operation.activeOperationType, activeOperationAgeMs: skipped.operation.activeOperationAgeMs }); } catch {} }
-          else {
+          else if (heavyJobRanThisTick) {
+            runtimeLogger.info('scheduler', 'scheduler_tick_heavy_job_limit', 'Scheduler tick heavy job limit reached; deferring scheduled_classifieds_maintainer', { job: 'scheduled_classifieds_maintainer', lastHeavyJobAt: __lastHeavyJobAt });
+            try { audit('scheduler_tick_heavy_job_limit', { job: 'scheduled_classifieds_maintainer' }); } catch {}
+          } else {
+            heavyJobRanThisTick = true;
+            __lastHeavyJobAt = Date.now();
             runtimeLogger.info('scheduler', 'scheduler_job_running', 'Scheduler running job', { job: 'scheduled_classifieds_maintainer' });
             await runExclusiveOperation('classifieds_maintainer', 'scheduled_classifieds_maintainer', async (signal, op) => runMaintainerIsolated('scheduled_classifieds_maintainer', { signal, operationId: op.id }), { timeoutMs: 90000 });
           }
         }
-        runtimeLogger.info('scheduler', 'scheduler_tick_completed', 'Scheduler tick completed', { elapsed_ms: Date.now() - tickStart });
+        runtimeLogger.info('scheduler', 'scheduler_tick_completed', 'Scheduler tick completed', { elapsed_ms: Date.now() - tickStart, heavy_job_ran: heavyJobRanThisTick });
       } catch (error) {
         runtimeLogger.error('scheduler', 'scheduler_tick_failed', 'Scheduler tick failed', runtimeErrorContext(error));
         audit('scheduler_tick_failed', { message: safeError(error) });
@@ -14145,5 +14260,5 @@ __server.listen(PORT, HOST, () => {
     runtimeLogger.error('startup', 'vault_loaded_failed', 'Main account vault startup status failed', runtimeErrorContext(error));
   }
   runtimeLogger.info('startup', 'config_loaded', 'Runtime options loaded', runtimeLoggerOptions());
-  console.log(`[tf2-hub] ${APP_VERSION} Trade state d-reference fix + maintainer abort`);
+  console.log(`[tf2-hub] ${APP_VERSION} Hard operation watchdog + stale lock release + elapsed fix`);
 });

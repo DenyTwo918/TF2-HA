@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const APP_VERSION = '5.13.49';
+const APP_VERSION = '5.13.50';
 const APP_NAME = 'TF2 Trading Hub';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -414,7 +414,7 @@ function runtimeLogVaultStatus(action, status = {}, extra = {}) {
 }
 
 
-// ── 5.13.49 – Operation single-flight coordinator ────────────────────────
+// ── 5.13.50 – Operation single-flight coordinator ────────────────────────
 let __activeOperation = null;
 let __providerSyncFlight = null;
 let __drainingOperation = null;
@@ -1845,7 +1845,7 @@ function getOptions() {
     backpack_tf_enabled: bool(options.backpack_tf_enabled, true),
     backpack_tf_access_token: String(credentialAccount.backpack_tf_access_token || options.backpack_tf_access_token || '').trim(),
     backpack_tf_api_key: String(credentialAccount.backpack_tf_api_key || options.backpack_tf_api_key || '').trim(),
-    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.49').trim(),
+    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.50').trim(),
     backpack_tf_base_url: String(options.backpack_tf_base_url || 'https://backpack.tf').replace(/\/$/, ''),
     backpack_tf_cache_ttl_minutes: clamp(options.backpack_tf_cache_ttl_minutes, 30, 1, 1440),
     backpack_tf_retry_count: clamp(options.backpack_tf_retry_count, 2, 0, 5),
@@ -3518,7 +3518,7 @@ class BackpackTfV2ListingManager {
     return configured.endsWith('/api') ? configured : `${configured}/api`;
   }
   headers(authMode = 'token') {
-    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.49' };
+    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.50' };
     if (authMode === 'token' && this.options.backpack_tf_access_token) headers['X-Auth-Token'] = this.options.backpack_tf_access_token;
     if (authMode === 'bearer' && this.options.backpack_tf_access_token) headers.authorization = `Bearer ${this.options.backpack_tf_access_token}`;
     if (authMode === 'api_key_header' && this.options.backpack_tf_api_key) headers['x-api-key'] = this.options.backpack_tf_api_key;
@@ -8190,7 +8190,7 @@ class SteamInventorySyncService {
       let accepted = null;
       let lastFailure = null;
       for (const variant of this.inventoryUrls(options.steam_id64, startAssetId)) {
-        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.49' } });
+        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.50' } });
         const body = result.body || {};
         const parsed = result.ok ? this.extractInventoryPayload(body) : { ok: false, error: result.error || body.error || body.raw || `HTTP ${result.status}` };
         attempts.push({
@@ -13058,7 +13058,7 @@ async function handleApi(req, res, pathname) {
   if (pathname === '/api/status') {
     const options = getOptions();
     const state = readJson(STATE_PATH, {});
-    // 5.13.49: Fast cached status — no heavy rebuilds, no maintainer.status() call.
+    // 5.13.50: Fast cached status — no heavy rebuilds, no maintainer.status() call.
     // Read the last persisted maintainer state directly from disk (one JSON read, cheap).
     const maintainerFile = readJson(CLASSIFIEDS_MAINTAINER_PATH, { ok: true, enabled: false, running: false });
     const maintainerCached = {
@@ -13078,7 +13078,7 @@ async function handleApi(req, res, pathname) {
       ok: true,
       app: APP_NAME,
       version: APP_VERSION,
-      scope: '5.13.49 – Trade State d Reference Fix',
+      scope: '5.13.50 – Hard Operation Watchdog + Stale Lock Release',
       mode: 'operations_cockpit_notifications_persistence_listing_engine_targeted_orders_multi_account_strategy_ollama',
       steam_web_api_key_saved: Boolean(options.steam_web_api_key),
       steam_web_api_key: redacted(options.steam_web_api_key),
@@ -13890,7 +13890,7 @@ async function handleApi(req, res, pathname) {
   }
   if (pathname === '/api/publish-wizard/prepare-key-to-metal' && (req.method === 'POST' || req.method === 'GET')) return json(res, 200, prepareKeyToMetalDraft(getOptions(), auditService));
   if (pathname === '/api/most-traded/status' || pathname === '/api/offer-booster/status' || pathname === '/api/auto-list-anything/status') return json(res, 200, buildMostTradedAndKeysStatus(getOptions()));
-  // 5.13.49: lite endpoint is always fast; full /status returns cached-only snapshot.
+  // 5.13.50: lite endpoint is always fast; full /status returns cached-only snapshot.
   // Heavy rebuild must be explicitly requested via POST /api/publish-wizard/rebuild.
   if (pathname === '/api/publish-wizard/status/lite') { try { return json(res, 200, buildPublishWizardLiteStatus()); } catch (error) { return json(res, 200, { ok: true, lite: true, version: APP_VERSION, updated_at: new Date().toISOString(), safe_fallback: true, error: safeError(error) }); } }
   if (pathname === '/api/publish-wizard/status') {
@@ -13903,7 +13903,7 @@ async function handleApi(req, res, pathname) {
     return json(res, 200, { ok: true, version: APP_VERSION, updated_at: new Date().toISOString(), cached: false, maintainer_running: __maintainerRunning, operation: operationPublicSnapshot(), active_operation: operationPublicSnapshot(), steps: [], guarded_publish_enabled: Boolean(options.allow_guarded_backpack_publish), live_classifieds_writes_enabled: Boolean(options.allow_live_classifieds_writes), backpack_tf_write_mode: options.backpack_tf_write_mode, publish_disabled_reason: 'Dashboard status not built yet. Click Rebuild to load.', classifieds_maintainer: { ok: true, running: __maintainerRunning, enabled: classifiedsMaintainer.enabled(options), note: 'pre_build_lite' }, auto_sell_relister: { ok: true, note: 'pre_build_lite' }, trade_offer_state_machine: { ok: true, counts: {}, states: [], next_action: 'Status will be available after first rebuild.' } });
   }
   if (pathname === '/api/publish-wizard/rebuild' && (req.method === 'POST' || req.method === 'GET')) {
-    // 5.13.49: Heavy rebuild is single-flight and never overlaps provider/maintainer.
+    // 5.13.50: Heavy rebuild is single-flight and never overlaps provider/maintainer.
     const result = await runExclusiveOperation('publish_wizard_rebuild', 'manual_publish_wizard_rebuild', async () => getCachedPublishWizardStatus(), { timeoutMs: 30000 });
     if (result.busy) return json(res, 202, result);
     if (result.ok && result.result) return json(res, 200, { ...result.result, rebuilt: true, operation: operationPublicSnapshot(), active_operation: operationPublicSnapshot() });
@@ -14145,5 +14145,5 @@ __server.listen(PORT, HOST, () => {
     runtimeLogger.error('startup', 'vault_loaded_failed', 'Main account vault startup status failed', runtimeErrorContext(error));
   }
   runtimeLogger.info('startup', 'config_loaded', 'Runtime options loaded', runtimeLoggerOptions());
-  console.log(`[tf2-hub] ${APP_VERSION} Trade state d-reference fix + maintainer abort`);
+  console.log(`[tf2-hub] ${APP_VERSION} Hard operation watchdog + stale lock release + elapsed fix`);
 });
