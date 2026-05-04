@@ -1,7 +1,7 @@
 slug: tf2_trading_hub
 name: TF2 Trading Hub
-version: "5.13.50"
-description: Hard operation watchdog with absolute deadline; stale lock release; scheduler preflight; elapsed display fix.
+version: "5.13.51"
+description: Maintainer hard isolation; no event loop block; independent 2s watchdog; heartbeat staleness; per-stage timeouts; 10-min cooldown gate.
 url: https://github.com/DenyTwo918/TF2-HA
 arch:
 - amd64
