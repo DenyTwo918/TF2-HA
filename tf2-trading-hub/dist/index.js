@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const APP_VERSION = '5.13.46';
+const APP_VERSION = '5.13.47';
 const APP_NAME = 'TF2 Trading Hub';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -411,6 +411,152 @@ function runtimeLogVaultStatus(action, status = {}, extra = {}) {
     readiness: status.readiness || null,
     missing: status.missing || null
   });
+}
+
+
+// ── 5.13.47 – Operation single-flight coordinator ────────────────────────
+let __activeOperation = null;
+let __providerSyncFlight = null;
+const OPERATION_DEFAULT_TIMEOUT_MS = 90000;
+const HEAVY_OPERATION_TYPES = new Set(['provider_sync', 'scheduled_pipeline', 'local_workflow', 'classifieds_maintainer', 'publish_wizard_rebuild', 'market_scanner', 'inventory_sync']);
+function nowIso() { return new Date().toISOString(); }
+function operationPublicSnapshot(op = __activeOperation) {
+  const active = Boolean(op && op.active);
+  const startedMs = op && Number(op.started_ms || 0);
+  return {
+    ok: true,
+    version: APP_VERSION,
+    active,
+    activeOperation: active,
+    activeOperationId: active ? op.id : null,
+    activeOperationType: active ? op.type : null,
+    activeOperationStartedAt: active ? op.started_at : null,
+    activeOperationAgeMs: active && startedMs ? Date.now() - startedMs : 0,
+    last_stage: active ? (op.last_stage || 'running') : null,
+    reason: active ? (op.reason || null) : null,
+    timeout_ms: active ? (op.timeout_ms || 0) : 0,
+    lastOperationResult: runtimeState.lastOperationResult || null,
+    provider_sync_in_flight: Boolean(__providerSyncFlight && __providerSyncFlight.promise),
+    provider_sync_operation_id: __providerSyncFlight ? __providerSyncFlight.id : null,
+    queue_policy: 'skip_when_busy'
+  };
+}
+function persistOperationState() {
+  try { writeJson(OPERATIONS_PATH, operationPublicSnapshot()); } catch {}
+}
+function logOperationEvent(eventType, payload = {}, level = 'info') {
+  const safePayload = { version: APP_VERSION, ...payload };
+  try { runtimeLogger[level] ? runtimeLogger[level]('operations', eventType, eventType.replace(/_/g, ' '), safePayload) : runtimeLogger.info('operations', eventType, eventType, safePayload); } catch {}
+  try { audit(eventType, safePayload); } catch {}
+  try { appendActionFeed(eventType, safePayload); } catch {}
+}
+function operationBusyPayload(requestedType, reason) {
+  const active = operationPublicSnapshot();
+  const payload = {
+    ok: true,
+    version: APP_VERSION,
+    busy: true,
+    skipped: true,
+    accepted_async: false,
+    already_running: true,
+    message: 'operation already running',
+    requested_operation_type: requestedType,
+    reason: reason || null,
+    operation: active,
+    activeOperationId: active.activeOperationId,
+    activeOperationType: active.activeOperationType,
+    activeOperationAgeMs: active.activeOperationAgeMs
+  };
+  return payload;
+}
+function activeOperationBusy() { return Boolean(__activeOperation && __activeOperation.active); }
+function markOperationStage(stage, extra = {}) {
+  if (!__activeOperation) return;
+  __activeOperation.last_stage = String(stage || 'running');
+  __activeOperation.last_stage_at = nowIso();
+  if (extra && typeof extra === 'object') __activeOperation.last_stage_detail = runtimeRedactValue('operation_stage', extra);
+  persistOperationState();
+}
+function beginOperation(type, reason, options = {}) {
+  if (!HEAVY_OPERATION_TYPES.has(type)) type = String(type || 'operation');
+  if (activeOperationBusy()) {
+    const busy = operationBusyPayload(type, reason);
+    logOperationEvent('operation_skipped_busy', { requested_type: type, reason, activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs });
+    return { started: false, busy: true, response: busy };
+  }
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const id = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(8).toString('hex');
+  __activeOperation = {
+    id,
+    active: true,
+    type,
+    reason: reason || type,
+    started_at: nowIso(),
+    started_ms: Date.now(),
+    timeout_ms: Number(options.timeoutMs || OPERATION_DEFAULT_TIMEOUT_MS),
+    last_stage: 'started',
+    last_stage_at: nowIso(),
+    abort_controller: controller,
+    promise: null
+  };
+  persistOperationState();
+  logOperationEvent('operation_started', { operationId: id, type, reason: reason || type, timeout_ms: __activeOperation.timeout_ms });
+  return { started: true, operation: __activeOperation, signal: controller ? controller.signal : null };
+}
+function clearOperation(op, eventType, result = {}) {
+  const elapsed = op && op.started_ms ? Date.now() - op.started_ms : 0;
+  const finalResult = { ok: result.ok !== false, version: APP_VERSION, operationId: op && op.id, type: op && op.type, reason: op && op.reason, elapsed_ms: elapsed, completed_at: nowIso(), ...result };
+  runtimeState.lastOperationResult = finalResult;
+  if (__activeOperation && op && __activeOperation.id === op.id) __activeOperation = null;
+  persistOperationState();
+  const level = eventType === 'operation_failed' || eventType === 'operation_timeout' ? (eventType === 'operation_timeout' ? 'error' : 'warn') : 'info';
+  logOperationEvent(eventType, finalResult, level);
+  return finalResult;
+}
+async function runExclusiveOperation(type, reason, fn, options = {}) {
+  const started = beginOperation(type, reason, options);
+  if (!started.started) return started.response;
+  const op = started.operation;
+  const timeoutMs = Number(options.timeoutMs || OPERATION_DEFAULT_TIMEOUT_MS);
+  let timer = null;
+  let timedOut = false;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      try { op.abort_controller && op.abort_controller.abort(); } catch {}
+      reject(new Error(`${type}_timeout_${Math.round(timeoutMs / 1000)}s`));
+    }, timeoutMs);
+    try { timer.unref && timer.unref(); } catch {}
+  });
+  try {
+    const task = Promise.resolve().then(() => fn(op.abort_controller ? op.abort_controller.signal : null, op));
+    op.promise = task;
+    const result = await Promise.race([task, timeoutPromise]);
+    if (timer) clearTimeout(timer);
+    return clearOperation(op, 'operation_completed', { ok: result && result.ok !== false, result });
+  } catch (error) {
+    if (timer) clearTimeout(timer);
+    const isTimeout = timedOut || /timeout/i.test(String(error && error.message || error));
+    if (isTimeout) {
+      const released = clearOperation(op, 'operation_timeout', { ok: false, timed_out: true, error: safeError(error) });
+      if (type === 'classifieds_maintainer') {
+        try { audit('maintainer_timeout_released_lock', { operationId: op.id, elapsed_ms: released.elapsed_ms, error: released.error }); } catch {}
+        try { runtimeLogger.error('maintainer', 'maintainer_timeout_released_lock', 'Maintainer timeout released operation lock', { operationId: op.id, elapsed_ms: released.elapsed_ms, error: released.error }); } catch {}
+        try { appendActionFeed('maintainer_timeout_released_lock', { operationId: op.id, elapsed_ms: released.elapsed_ms, error: released.error }); } catch {}
+      }
+      return { ok: false, version: APP_VERSION, timed_out: true, error: safeError(error), operation: operationPublicSnapshot(), operation_result: released };
+    }
+    const failed = clearOperation(op, 'operation_failed', { ok: false, error: safeError(error) });
+    return { ok: false, version: APP_VERSION, error: safeError(error), operation_result: failed };
+  }
+}
+function schedulerBusySkip(job) {
+  const active = operationPublicSnapshot();
+  const payload = { job, activeOperationType: active.activeOperationType, activeOperationId: active.activeOperationId, activeOperationAgeMs: active.activeOperationAgeMs };
+  runtimeLogger.info('scheduler', 'scheduler_job_skipped_busy', 'Scheduler job skipped: operation already running', payload);
+  try { audit('scheduler_job_skipped_busy', payload); } catch {}
+  try { appendActionFeed('scheduler_job_skipped_busy', payload); } catch {}
+  return { ok: true, skipped: true, busy: true, message: 'operation already running', operation: active };
 }
 
 
@@ -1609,7 +1755,7 @@ function getOptions() {
     backpack_tf_enabled: bool(options.backpack_tf_enabled, true),
     backpack_tf_access_token: String(credentialAccount.backpack_tf_access_token || options.backpack_tf_access_token || '').trim(),
     backpack_tf_api_key: String(credentialAccount.backpack_tf_api_key || options.backpack_tf_api_key || '').trim(),
-    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.44').trim(),
+    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.47').trim(),
     backpack_tf_base_url: String(options.backpack_tf_base_url || 'https://backpack.tf').replace(/\/$/, ''),
     backpack_tf_cache_ttl_minutes: clamp(options.backpack_tf_cache_ttl_minutes, 30, 1, 1440),
     backpack_tf_retry_count: clamp(options.backpack_tf_retry_count, 2, 0, 5),
@@ -3282,7 +3428,7 @@ class BackpackTfV2ListingManager {
     return configured.endsWith('/api') ? configured : `${configured}/api`;
   }
   headers(authMode = 'token') {
-    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.44' };
+    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.47' };
     if (authMode === 'token' && this.options.backpack_tf_access_token) headers['X-Auth-Token'] = this.options.backpack_tf_access_token;
     if (authMode === 'bearer' && this.options.backpack_tf_access_token) headers.authorization = `Bearer ${this.options.backpack_tf_access_token}`;
     if (authMode === 'api_key_header' && this.options.backpack_tf_api_key) headers['x-api-key'] = this.options.backpack_tf_api_key;
@@ -3550,7 +3696,20 @@ class BackpackTfV2ListingManager {
     return { ok: false, stage: 'prices_empty_or_failed', status: attempts.at(-1)?.status || 0, error: debug.error, attempts };
   }
   async syncListings(force = false) {
+    if (__providerSyncFlight && __providerSyncFlight.promise) {
+      runtimeLogger.info('backpack_tf', 'provider_sync_joined_existing', 'Backpack.tf provider sync joined existing in-flight request', { force: Boolean(force), providerOperationId: __providerSyncFlight.id, activeOperationType: operationPublicSnapshot().activeOperationType });
+      try { audit('provider_sync_joined_existing', { providerOperationId: __providerSyncFlight.id, force: Boolean(force) }); } catch {}
+      try { appendActionFeed('provider_sync_joined_existing', { providerOperationId: __providerSyncFlight.id, force: Boolean(force) }); } catch {}
+      return __providerSyncFlight.promise;
+    }
+    const providerOperationId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(8).toString('hex');
+    const promise = this.__syncListingsSingleFlight(force).finally(() => { if (__providerSyncFlight && __providerSyncFlight.id === providerOperationId) __providerSyncFlight = null; });
+    __providerSyncFlight = { id: providerOperationId, force: Boolean(force), started_at: new Date().toISOString(), promise };
+    return promise;
+  }
+  async __syncListingsSingleFlight(force = false) {
     const startedAt = Date.now();
+    markOperationStage('provider_sync', { force: Boolean(force) });
     runtimeLogger.info('backpack_tf', 'provider_sync_start', 'Backpack.tf provider sync started', { force: Boolean(force), hasAccessToken: Boolean(this.options.backpack_tf_access_token), hasApiKey: Boolean(this.options.backpack_tf_api_key) });
     if (!this.options.backpack_tf_enabled) {
       runtimeLogger.warn('backpack_tf', 'provider_sync_failed', 'Backpack.tf provider disabled', { stage: 'provider_disabled' });
@@ -7354,7 +7513,7 @@ async function runLocalWorkflow(auditSvc) {
   const steps = [];
   const step = async (name, fn) => {
     const t0 = Date.now();
-    try { const r = await fn(); steps.push({ step: name, ok: r && r.ok !== false, duration_ms: Date.now() - t0, summary: r ? { ok: r.ok, error: r.error || null, items: r.items?.length || r.candidates?.length || r.drafts?.length || r.entries?.length || null } : null }); return r; }
+    try { markOperationStage(`local_workflow:${name}`); const r = await fn(); steps.push({ step: name, ok: r && r.ok !== false, duration_ms: Date.now() - t0, summary: r ? { ok: r.ok, error: r.error || null, items: r.items?.length || r.candidates?.length || r.drafts?.length || r.entries?.length || null } : null }); return r; }
     catch (err) { steps.push({ step: name, ok: false, duration_ms: Date.now() - t0, error: safeError(err) }); return { ok: false, error: safeError(err) }; }
   };
   await step('provider_sync', async () => (options.backpack_tf_enabled && (options.backpack_tf_access_token || options.backpack_tf_api_key)) ? new BackpackTfV2ListingManager(options, auditSvc).syncListings(true) : { ok: true, skipped: true, reason: 'backpack_credentials_missing_or_disabled' });
@@ -7928,7 +8087,7 @@ class SteamInventorySyncService {
       let accepted = null;
       let lastFailure = null;
       for (const variant of this.inventoryUrls(options.steam_id64, startAssetId)) {
-        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.44' } });
+        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.47' } });
         const body = result.body || {};
         const parsed = result.ok ? this.extractInventoryPayload(body) : { ok: false, error: result.error || body.error || body.raw || `HTTP ${result.status}` };
         attempts.push({
@@ -10152,6 +10311,13 @@ class HubAutopilotPipelineService {
     return !last || (Date.now() - last >= options.review_interval_minutes * 60 * 1000);
   }
   async run(reason = 'scheduled_pipeline') {
+    if ((reason === 'scheduled_pipeline' || reason === 'manual_pipeline') && activeOperationBusy() && !(__activeOperation && __activeOperation.type === 'scheduled_pipeline')) {
+      const busy = operationBusyPayload('scheduled_pipeline', reason);
+      runtimeLogger.info('scheduler', 'scheduler_job_skipped_busy', 'Scheduled pipeline skipped: operation already running', { activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs });
+      try { audit('scheduler_job_skipped_busy', { job: 'scheduled_pipeline', activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs }); } catch {}
+      try { appendActionFeed('scheduler_job_skipped_busy', { job: 'scheduled_pipeline', activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs }); } catch {}
+      return busy;
+    }
     if (this.running) return { ok: false, skipped: true, stage: 'already_running' };
     this.running = true;
     const started = new Date().toISOString();
@@ -10160,18 +10326,21 @@ class HubAutopilotPipelineService {
     writeJson(HUB_AUTOPILOT_PATH, { ...this.status(), running: true, last_started_at: started });
     try {
       if (options.backpack_tf_enabled && options.hub_autopilot_sync_backpack && (options.backpack_tf_access_token || options.backpack_tf_api_key)) {
+        markOperationStage('scheduled_pipeline:provider_sync');
         const sync = await new BackpackTfV2ListingManager(options, this.audit).syncListings(true);
         result.stages.push({ stage: 'provider_sync', ok: Boolean(sync.ok), listings: Number(sync.listings_count || 0), prices: Number(sync.prices_count || 0), cache_stage: sync.stage || null, error: sync.error || null });
       } else {
         result.stages.push({ stage: 'provider_sync', skipped: true, reason: 'disabled_or_credentials_missing' });
       }
       if (options.hub_autopilot_sync_inventory && options.inventory_sync_enabled && options.steam_id64) {
+        markOperationStage('scheduled_pipeline:inventory_sync');
         const inventory = await new SteamInventorySyncService(this.audit).sync(true);
         result.stages.push({ stage: 'inventory_sync', ok: Boolean(inventory.ok), items: Number(inventory.items_count || 0), priced: Number(inventory.analysis?.priced_items || 0), value_ref: Number(inventory.analysis?.estimated_value_ref || 0), error: inventory.error || null });
       } else {
         result.stages.push({ stage: 'inventory_sync', skipped: true, reason: 'disabled_or_steamid_missing' });
       }
       if (options.hub_autopilot_build_market && options.market_scanner_enabled) {
+        markOperationStage('scheduled_pipeline:market_scanner');
         const scanner = new MarketTargetScannerService(this.audit).build(options);
         result.stages.push({ stage: 'market_scanner', ok: Boolean(scanner.ok), candidates: Number(scanner.summary?.total_candidates || (scanner.candidates || []).length || 0), fallback: Boolean(scanner.diagnostics?.relaxed_fallback_used || scanner.diagnostics?.forced_watchlist_fallback_used), error: scanner.error || null });
       }
@@ -11608,7 +11777,7 @@ class PersistentClassifiedsMaintainerService {
       .map(x => x.draft)
       .slice(0, Math.max(limit, 1));
   }
-  async run(reason = 'scheduled_classifieds_maintainer') {
+  async run(reason = 'scheduled_classifieds_maintainer', context = {}) {
     if (this.running) return { ok: false, skipped: true, stage: 'already_running', version: APP_VERSION };
     this.running = true;
     const options = getOptions();
@@ -11897,6 +12066,8 @@ class PersistentClassifiedsMaintainerService {
           continue;
         }
 
+        if (context && context.signal && context.signal.aborted) throw new Error('maintainer_aborted_before_publish');
+        markOperationStage('classifieds_maintainer:publish_loop', { candidateId });
         const publish = await draftService.publishGuarded(candidateId, options, { confirm: true, maintainer: true });
         if (publish.provider_request_sent !== false) {
           publishAttempts += 1;
@@ -12798,7 +12969,7 @@ async function handleApi(req, res, pathname) {
       ok: true,
       app: APP_NAME,
       version: APP_VERSION,
-      scope: '5.13.46 – Maintainer Crash Isolation + Fast Status API',
+      scope: '5.13.47 – Operation Single-Flight Lock + Maintainer Queue Fix',
       mode: 'operations_cockpit_notifications_persistence_listing_engine_targeted_orders_multi_account_strategy_ollama',
       steam_web_api_key_saved: Boolean(options.steam_web_api_key),
       steam_web_api_key: redacted(options.steam_web_api_key),
@@ -12812,6 +12983,8 @@ async function handleApi(req, res, pathname) {
       backpack_tf_write_mode: options.backpack_tf_write_mode,
       live_classifieds_writes_enabled: Boolean(options.allow_live_classifieds_writes),
       persistent_classifieds_maintainer: maintainerCached,
+      operation: operationPublicSnapshot(),
+      active_operation: operationPublicSnapshot(),
       notification_center_enabled: options.notification_center_enabled,
       operations_cockpit_enabled: options.operations_cockpit_enabled,
       data_schema_version: DATA_SCHEMA_VERSION,
@@ -13184,8 +13357,8 @@ async function handleApi(req, res, pathname) {
   if (pathname === '/api/autonomy/status') return json(res, 200, buildAutonomyStatus());
   if (pathname === '/api/autopilot/run') {
     if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'Use POST.' });
-    const result = await hubAutopilot.run('manual_pipeline');
-    return json(res, result.ok ? 200 : 400, result);
+    const result = await runExclusiveOperation('scheduled_pipeline', 'manual_pipeline', async () => hubAutopilot.run('manual_pipeline'), { timeoutMs: 90000 });
+    return json(res, result.busy ? 202 : (result.ok ? 200 : 400), result.result || result);
   }
   if (pathname === '/api/setup/status') {
     const setup = new HubSetupService(auditService).status(null);
@@ -13229,7 +13402,12 @@ async function handleApi(req, res, pathname) {
   if (pathname === '/api/decisions') return json(res, 200, readJson(DECISIONS_PATH, { ok: false, error: 'No decisions yet.' }));
   if (pathname === '/api/notifications') return json(res, 200, { ok: true, entries: notificationService.list(200) });
   if (pathname === '/api/action-feed') return json(res, 200, readJson(ACTION_FEED_PATH, { ok: true, entries: [] }));
-  if (pathname === '/api/operations') return json(res, 200, readJson(OPERATIONS_PATH, { ok: false, error: 'No operations cockpit data yet. Run review first.' }));
+  if (pathname === '/api/operations/status') return json(res, 200, operationPublicSnapshot());
+  if (pathname === '/api/operations/cancel' && (req.method === 'POST' || req.method === 'GET')) {
+    if (__activeOperation && __activeOperation.abort_controller) { try { __activeOperation.abort_controller.abort(); } catch {} }
+    return json(res, 202, { ok: true, version: APP_VERSION, requested: 'cancel', note: 'Cancellation is cooperative. Live publish requests already sent are not interrupted.', operation: operationPublicSnapshot() });
+  }
+  if (pathname === '/api/operations') return json(res, 200, { ...readJson(OPERATIONS_PATH, { ok: true }), operation: operationPublicSnapshot() });
   if (pathname === '/api/data/status') return json(res, 200, new DataPersistenceMigrationService(auditService).status());
   if (pathname === '/api/data/migrate') {
     if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'Use POST.' });
@@ -13294,8 +13472,8 @@ async function handleApi(req, res, pathname) {
   if (pathname === '/api/inventory/status') return json(res, 200, new SteamInventorySyncService(auditService).current());
   if (pathname === '/api/inventory/sync') {
     if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'Use POST.' });
-    const result = await new SteamInventorySyncService(auditService).sync(true);
-    return json(res, result.ok ? 200 : 400, result);
+    const result = await runExclusiveOperation('inventory_sync', 'manual_inventory_sync', async () => new SteamInventorySyncService(auditService).sync(true), { timeoutMs: 45000 });
+    return json(res, result.busy ? 202 : (result.ok ? 200 : 400), result.result || result);
   }
   if (pathname === '/api/backpack/status') {
     const options = getOptions();
@@ -13304,15 +13482,14 @@ async function handleApi(req, res, pathname) {
   if (pathname === '/api/backpack/listings') return json(res, 200, readJson(BACKPACK_LISTINGS_PATH, { ok: false, error: 'No backpack.tf listing cache yet.' }));
   if (pathname === '/api/backpack/sync') {
     if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'Use POST.' });
-    const manager = new BackpackTfV2ListingManager(getOptions(), auditService);
-    const result = await manager.syncListings(true);
-    return json(res, result.ok ? 200 : 400, result);
+    const result = await runExclusiveOperation('provider_sync', 'manual_backpack_sync', async () => new BackpackTfV2ListingManager(getOptions(), auditService).syncListings(true), { timeoutMs: 45000 });
+    return json(res, result.busy ? 202 : (result.ok ? 200 : 400), result.result || result);
   }
   if (pathname === '/api/market-scanner') return json(res, 200, readJson(MARKET_SCANNER_PATH, { ok: false, error: 'No market scanner snapshot yet. Run Build market scanner after Sync Backpack.tf.', candidates: [] }));
   if (pathname === '/api/market-scanner/build') {
     if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'Use POST.' });
-    const result = new MarketTargetScannerService(auditService).build(getOptions());
-    return json(res, result.ok ? 200 : 400, result);
+    const result = await runExclusiveOperation('market_scanner', 'manual_market_scanner', async () => new MarketTargetScannerService(auditService).build(getOptions()), { timeoutMs: 30000 });
+    return json(res, result.busy ? 202 : (result.ok ? 200 : 400), result.result || result);
   }
   if (pathname === '/api/backpack/plan') return json(res, 200, readJson(LISTING_PLAN_PATH, { ok: false, error: 'No listing plan yet.' }));
   if (pathname === '/api/backpack/execute-plan') {
@@ -13549,7 +13726,17 @@ async function handleApi(req, res, pathname) {
   if (pathname === '/api/system/forbidden-fields-audit') return json(res, 200, runForbiddenFieldsAudit());
 
   // ── 5.13.29 – Local Workflow ──────────────────────────────────────────
-  if (pathname === '/api/workflow/run-local' && req.method === 'POST') return json(res, 200, await runLocalWorkflow(auditService));
+  if (pathname === '/api/workflow/run-local' && req.method === 'POST') {
+    if (activeOperationBusy()) {
+      const busy = operationBusyPayload('local_workflow', 'manual_run_local');
+      runtimeLogger.info('workflow', 'workflow_skipped_busy', 'Local workflow skipped: operation already running', { activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs });
+      try { audit('workflow_skipped_busy', { activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs }); } catch {}
+      try { appendActionFeed('workflow_skipped_busy', { activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs }); } catch {}
+      return json(res, 202, busy);
+    }
+    const result = await runExclusiveOperation('local_workflow', 'manual_run_local', async () => runLocalWorkflow(auditService), { timeoutMs: 90000 });
+    return json(res, result.busy ? 202 : 200, result.result || result);
+  }
   if (pathname === '/api/workflow/run-local' && req.method === 'GET') return json(res, 200, readJson(LOCAL_WORKFLOW_PATH, { ok: false, error: 'No local workflow run yet.' }));
 
   // ── 5.13.29 – Guarded Publish Executor Self-Test ─────────────────────
@@ -13602,21 +13789,18 @@ async function handleApi(req, res, pathname) {
     const options = getOptions();
     const cached = __publishWizardCache.result;
     if (cached) {
-      return json(res, 200, { ...cached, cached: true, cache_age_ms: Date.now() - __publishWizardCache.builtAt, maintainer_running: __maintainerRunning });
+      return json(res, 200, { ...cached, cached: true, cache_age_ms: Date.now() - __publishWizardCache.builtAt, maintainer_running: __maintainerRunning, operation: operationPublicSnapshot(), active_operation: operationPublicSnapshot() });
     }
-    return json(res, 200, { ok: true, version: APP_VERSION, updated_at: new Date().toISOString(), cached: false, maintainer_running: __maintainerRunning, steps: [], guarded_publish_enabled: Boolean(options.allow_guarded_backpack_publish), live_classifieds_writes_enabled: Boolean(options.allow_live_classifieds_writes), backpack_tf_write_mode: options.backpack_tf_write_mode, publish_disabled_reason: 'Dashboard status not built yet. Click Rebuild to load.', classifieds_maintainer: { ok: true, running: __maintainerRunning, enabled: classifiedsMaintainer.enabled(options), note: 'pre_build_lite' }, auto_sell_relister: { ok: true, note: 'pre_build_lite' }, trade_offer_state_machine: { ok: true, counts: {}, states: [], next_action: 'Status will be available after first rebuild.' } });
+    return json(res, 200, { ok: true, version: APP_VERSION, updated_at: new Date().toISOString(), cached: false, maintainer_running: __maintainerRunning, operation: operationPublicSnapshot(), active_operation: operationPublicSnapshot(), steps: [], guarded_publish_enabled: Boolean(options.allow_guarded_backpack_publish), live_classifieds_writes_enabled: Boolean(options.allow_live_classifieds_writes), backpack_tf_write_mode: options.backpack_tf_write_mode, publish_disabled_reason: 'Dashboard status not built yet. Click Rebuild to load.', classifieds_maintainer: { ok: true, running: __maintainerRunning, enabled: classifiedsMaintainer.enabled(options), note: 'pre_build_lite' }, auto_sell_relister: { ok: true, note: 'pre_build_lite' }, trade_offer_state_machine: { ok: true, counts: {}, states: [], next_action: 'Status will be available after first rebuild.' } });
   }
   if (pathname === '/api/publish-wizard/rebuild' && (req.method === 'POST' || req.method === 'GET')) {
-    // 5.13.46: Only this endpoint does the heavy publish wizard status rebuild.
-    const rebuildTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('publish_wizard_rebuild_timeout_30s')), 30000));
-    try {
-      const result = await Promise.race([Promise.resolve().then(() => getCachedPublishWizardStatus()), rebuildTimeout]);
-      return json(res, 200, { ...result, rebuilt: true });
-    } catch (error) {
-      runtimeLogger.error('publish_wizard', 'publish_wizard_rebuild_failed', 'Publish wizard rebuild failed', runtimeErrorContext(error));
-      const options = getOptions();
-      return json(res, 200, { ok: false, version: APP_VERSION, updated_at: new Date().toISOString(), safe_fallback: true, rebuilt: false, error: safeError(error), steps: [], guarded_publish_enabled: Boolean(options.allow_guarded_backpack_publish), live_classifieds_writes_enabled: Boolean(options.allow_live_classifieds_writes), backpack_tf_write_mode: options.backpack_tf_write_mode, publish_disabled_reason: 'Status rebuild failed. Run diagnostics if this repeats.' });
-    }
+    // 5.13.47: Heavy rebuild is single-flight and never overlaps provider/maintainer.
+    const result = await runExclusiveOperation('publish_wizard_rebuild', 'manual_publish_wizard_rebuild', async () => getCachedPublishWizardStatus(), { timeoutMs: 30000 });
+    if (result.busy) return json(res, 202, result);
+    if (result.ok && result.result) return json(res, 200, { ...result.result, rebuilt: true, operation: operationPublicSnapshot(), active_operation: operationPublicSnapshot() });
+    runtimeLogger.error('publish_wizard', 'publish_wizard_rebuild_failed', 'Publish wizard rebuild failed', { error: result.error || 'unknown' });
+    const options = getOptions();
+    return json(res, 200, { ok: false, version: APP_VERSION, updated_at: new Date().toISOString(), safe_fallback: true, rebuilt: false, error: result.error || 'publish wizard rebuild failed', steps: [], guarded_publish_enabled: Boolean(options.allow_guarded_backpack_publish), live_classifieds_writes_enabled: Boolean(options.allow_live_classifieds_writes), backpack_tf_write_mode: options.backpack_tf_write_mode, publish_disabled_reason: 'Status rebuild failed. Run diagnostics if this repeats.', operation: operationPublicSnapshot(), active_operation: operationPublicSnapshot() });
   }
   if (pathname === '/api/publish-wizard/prepare-one' && req.method === 'POST') {
     const queue = new PlanningQueueService(auditService);
@@ -13683,12 +13867,16 @@ async function handleApi(req, res, pathname) {
     // still in progress.  Start manual runs in the background and return an
     // immediate accepted status.  The live dashboard poll then reads the run
     // result from /api/classifieds-maintainer/status.
-    if (__maintainerRunning) {
-      return json(res, 202, { ok: true, version: APP_VERSION, accepted_async: false, already_running: true, message: 'Maintainer is already running. Dashboard will refresh automatically.' });
+    if (__maintainerRunning || activeOperationBusy()) {
+      const busy = operationBusyPayload('classifieds_maintainer', 'manual_ui_async');
+      runtimeLogger.info('maintainer', 'maintainer_skipped_busy', 'Maintainer skipped: operation already running', { activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs });
+      try { audit('maintainer_skipped_busy', { activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs }); } catch {}
+      try { appendActionFeed('maintainer_skipped_busy', { activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs }); } catch {}
+      return json(res, 202, busy);
     }
     const acceptedAt = new Date().toISOString();
-    setTimeout(() => { runMaintainerIsolated('manual_ui_async').catch(() => {}); }, 25);
-    return json(res, 202, { ok: true, version: APP_VERSION, accepted_async: true, accepted_at: acceptedAt, message: 'Maintainer run accepted and started in the background. Watch dashboard live status for progress/results.' });
+    runExclusiveOperation('classifieds_maintainer', 'manual_ui_async', async (signal, op) => runMaintainerIsolated('manual_ui_async', { signal, operationId: op.id }), { timeoutMs: 90000 }).catch(() => {});
+    return json(res, 202, { ok: true, version: APP_VERSION, accepted_async: true, accepted_at: acceptedAt, operation: operationPublicSnapshot(), message: 'Maintainer run accepted and started in the background. Watch dashboard live status for progress/results.' });
   }
 
   if (pathname === '/api/startup-rebuild/status') return json(res, 200, new StartupRebuildControllerService(auditService).current());
@@ -13727,7 +13915,7 @@ async function handle(req, res) {
   }
   try { return isApi ? await handleApi(req, res, pathname) : serveStatic(res, pathname); } catch (error) { runtimeLogger.error('api', 'api_request_failed', 'API request failed', runtimeErrorContext(error, { requestId, method: req.method, path: pathname, durationMs: Date.now() - requestStartedAt })); audit('server_error', { path: pathname, message: safeError(error) }); return json(res, 500, { ok: false, error: 'Internal server error.' }); }
 }
-async function runMaintainerIsolated(reason = 'scheduled_classifieds_maintainer') {
+async function runMaintainerIsolated(reason = 'scheduled_classifieds_maintainer', context = {}) {
   if (__maintainerRunning) {
     runtimeLogger.info('maintainer', 'maintainer_skipped_already_running', 'Maintainer skipped: already running', { reason });
     audit('maintainer_skipped_already_running', { reason });
@@ -13745,7 +13933,7 @@ async function runMaintainerIsolated(reason = 'scheduled_classifieds_maintainer'
   let result;
   try {
     result = await Promise.race([
-      classifiedsMaintainer.run(reason),
+      classifiedsMaintainer.run(reason, context),
       timeoutPromise
     ]);
     runtimeState.maintainerLastCompletedAt = new Date().toISOString();
@@ -13754,13 +13942,14 @@ async function runMaintainerIsolated(reason = 'scheduled_classifieds_maintainer'
     audit('maintainer_completed', { reason, elapsed_ms: Date.now() - startedAt, ok: Boolean(result && result.ok) });
     appendActionFeed('maintainer_completed', { reason, elapsed_ms: Date.now() - startedAt, ok: Boolean(result && result.ok) });
   } catch (error) {
-    const isTimeout = error && error.message === 'maintainer_timeout_90s';
+    const isTimeout = error && /maintainer_timeout_90s|classifieds_maintainer_timeout_90s/.test(String(error.message || error));
     const errSafe = safeError(error);
     runtimeState.maintainerLastError = { error: errSafe, at: new Date().toISOString(), timed_out: isTimeout };
     runtimeState.maintainerLastCompletedAt = new Date().toISOString();
     runtimeLogger.error('maintainer', isTimeout ? 'maintainer_timeout' : 'maintainer_failed', isTimeout ? 'Maintainer timed out after 90s' : 'Maintainer failed with error', { reason, elapsed_ms: Date.now() - startedAt, error: errSafe, timed_out: isTimeout });
     audit(isTimeout ? 'maintainer_timeout' : 'maintainer_failed', { reason, elapsed_ms: Date.now() - startedAt, error: errSafe });
     appendActionFeed(isTimeout ? 'maintainer_timeout' : 'maintainer_failed', { reason, elapsed_ms: Date.now() - startedAt, error: errSafe });
+    if (isTimeout) { try { audit('maintainer_timeout_released_lock', { reason, elapsed_ms: Date.now() - startedAt, error: errSafe }); } catch {} try { appendActionFeed('maintainer_timeout_released_lock', { reason, elapsed_ms: Date.now() - startedAt, error: errSafe }); } catch {} }
     try { writeCrashReport(isTimeout ? 'maintainer_timeout' : 'maintainer_failed', error, { reason, elapsed_ms: Date.now() - startedAt }); } catch {}
     try {
       const state = readJson(CLASSIFIEDS_MAINTAINER_PATH, { runs: [] });
@@ -13790,12 +13979,18 @@ function startScheduler() {
     Promise.resolve().then(async () => {
       try {
         if (hubAutopilot.due()) {
-          runtimeLogger.info('scheduler', 'scheduler_job_running', 'Scheduler running job', { job: 'scheduled_pipeline' });
-          await hubAutopilot.run('scheduled_pipeline').catch(error => { runtimeLogger.error('scheduler', 'scheduler_job_failed', 'Scheduler job failed', { job: 'scheduled_pipeline', error: safeError(error) }); audit('scheduled_pipeline_failed', { message: safeError(error) }); });
+          if (activeOperationBusy()) { schedulerBusySkip('scheduled_pipeline'); }
+          else {
+            runtimeLogger.info('scheduler', 'scheduler_job_running', 'Scheduler running job', { job: 'scheduled_pipeline' });
+            await runExclusiveOperation('scheduled_pipeline', 'scheduled_pipeline', async () => hubAutopilot.run('scheduled_pipeline'), { timeoutMs: 90000 }).catch(error => { runtimeLogger.error('scheduler', 'scheduler_job_failed', 'Scheduler job failed', { job: 'scheduled_pipeline', error: safeError(error) }); audit('scheduled_pipeline_failed', { message: safeError(error) }); });
+          }
         }
         if (classifiedsMaintainer.due()) {
-          runtimeLogger.info('scheduler', 'scheduler_job_running', 'Scheduler running job', { job: 'scheduled_classifieds_maintainer' });
-          await runMaintainerIsolated('scheduled_classifieds_maintainer');
+          if (activeOperationBusy()) { const skipped = schedulerBusySkip('scheduled_classifieds_maintainer'); try { audit('maintainer_skipped_busy', { activeOperationType: skipped.operation.activeOperationType, activeOperationAgeMs: skipped.operation.activeOperationAgeMs }); } catch {} }
+          else {
+            runtimeLogger.info('scheduler', 'scheduler_job_running', 'Scheduler running job', { job: 'scheduled_classifieds_maintainer' });
+            await runExclusiveOperation('classifieds_maintainer', 'scheduled_classifieds_maintainer', async (signal, op) => runMaintainerIsolated('scheduled_classifieds_maintainer', { signal, operationId: op.id }), { timeoutMs: 90000 });
+          }
         }
         runtimeLogger.info('scheduler', 'scheduler_tick_completed', 'Scheduler tick completed', { elapsed_ms: Date.now() - tickStart });
       } catch (error) {

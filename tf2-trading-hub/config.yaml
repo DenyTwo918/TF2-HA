@@ -1,7 +1,7 @@
 slug: tf2_trading_hub
 name: TF2 Trading Hub
-version: "5.13.46"
-description: Maintainer crash isolation with 90s hard timeout; fast /api/status and /api/publish-wizard/status; POST /api/publish-wizard/rebuild for heavy builds.
+version: "5.13.47"
+description: Operation single-flight lock prevents overlapping provider sync, workflow, scheduler and maintainer jobs.
 url: https://github.com/DenyTwo918/TF2-HA
 arch:
 - amd64
@@ -46,7 +46,7 @@ options:
   max_offer_value_ref: 100
   do_not_trade_tags: scam,blocked,do_not_trade
   backpack_tf_enabled: true
-  backpack_tf_user_agent: TF2-HA-TF2-Trading-Hub/5.13.46
+  backpack_tf_user_agent: TF2-HA-TF2-Trading-Hub/5.13.47
   backpack_tf_base_url: https://backpack.tf
   backpack_tf_cache_ttl_minutes: 30
   backpack_tf_retry_count: 2
