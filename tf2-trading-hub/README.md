@@ -108,6 +108,10 @@ Adds a Backpack.tf listing verification endpoint, automatic post-publish verific
 The maintainer can now auto-fill buy listing slots toward `target_active_buy_listings` while keeping a default stock cap of one item per SKU. Existing active buy listings, owned items, active sell listings and good incoming offers prevent another buy listing for the same item.
 
 
+## 5.13.44 – Main Account No-Wipe Guard + Crash Trace
+
+Canonical vault (`tf2-hub-main-account.json`) is never overwritten by empty/null values. A dedicated last-good file (`tf2-hub-main-account.last-good.json`) is written on every successful save and is used to restore the canonical vault at startup if it is missing or blank. Empty credential fields from the frontend are omitted from save payloads rather than sent as empty strings. Migration now writes a state marker (`tf2-hub-migration-state.json`) and skips re-running when the schema version is already current. Crashes are written to a single-entry `tf2-hub-last-crash.json` in addition to the rolling crash log, and the `runtime_crash_captured` action feed event is emitted. SIGTERM is captured. Scheduler tick logging added (`scheduler_tick_started`/`scheduler_tick_completed`/`scheduler_job_failed`). New `GET /api/main-account/persistence-debug` endpoint and "Persistence debug" card in the credentials UI.
+
 ## 5.13.43 – Fast Dashboard Load & Faster Listing Fill
 
 Adds a central Trading Brain status layer for buy/sell/counteroffer decisions, profit floors, SKU stock cap and balanced key+metal currency policy. This is the baseline for the 5.13 refactor line.

@@ -1,6 +1,6 @@
 {
   "name": "tf2-trading-hub-addon",
-  "version": "5.13.43",
+  "version": "5.13.44",
   "private": true,
   "main": "dist/server.js",
   "scripts": {
@@ -8,5 +8,5 @@
     "start": "node dist/server.js"
   },
   "dependencies": {},
-  "description": "TF2 Trading Hub: restart-safe Main account persistence plus Backpack price schema diagnostics."
+  "description": "TF2 Trading Hub: Main account no-wipe guard, last-good restore, crash trace, migration state, and persistence debug."
 }
