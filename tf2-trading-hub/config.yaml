@@ -1,7 +1,7 @@
 slug: tf2_trading_hub
 name: TF2 Trading Hub
-version: "5.13.44"
-description: Main account no-wipe guard with last-good restore, crash trace to last-crash file, migration state skip, and persistence debug endpoint.
+version: "5.13.45"
+description: Main account fast local-only save that never hangs; hard 1500ms timeout; save-in-progress guard; scheduler skips while save is active.
 url: https://github.com/DenyTwo918/TF2-HA
 arch:
 - amd64
@@ -46,7 +46,7 @@ options:
   max_offer_value_ref: 100
   do_not_trade_tags: scam,blocked,do_not_trade
   backpack_tf_enabled: true
-  backpack_tf_user_agent: TF2-HA-TF2-Trading-Hub/5.13.44
+  backpack_tf_user_agent: TF2-HA-TF2-Trading-Hub/5.13.45
   backpack_tf_base_url: https://backpack.tf
   backpack_tf_cache_ttl_minutes: 30
   backpack_tf_retry_count: 2

@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const APP_VERSION = '5.13.44';
+const APP_VERSION = '5.13.45';
 const APP_NAME = 'TF2 Trading Hub';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -104,6 +104,7 @@ const STEAMGUARD_REFRESH_TOKEN_PATH = path.join(DATA_DIR, 'steam-companion-steam
 const TRADE_ACCEPT_LOG_PATH = path.join(DATA_DIR, 'steam-companion-trade-accept-log.json');
 const BACKUP_DIR = path.join(DATA_DIR, 'steam-companion-backups');
 const DATA_SCHEMA_VERSION = 51300;
+let __saveInProgress = false;
 const BLOCKED_TERMS = [];
 const ACCOUNT_ROLE_DEFINITIONS = {
   main: {
@@ -1123,6 +1124,104 @@ function buildPersistenceDebug() {
     secrets_returned: false
   };
 }
+function fastLocalMainAccountSave(payload = {}, requestId = runtimeRequestId()) {
+  const startedAt = Date.now();
+  const traceId = payload.__save_trace_id || requestId;
+  const elapsed = () => Date.now() - startedAt;
+  const logStep = (event, data = {}) => { try { runtimeLogger.info('main_account', event, event, { trace_id: traceId, elapsed_ms: elapsed(), ...data }); } catch {} };
+  const traceStep = (stage, data = {}) => { try { mainAccountSaveTrace(stage, { trace_id: traceId, elapsed_ms: elapsed(), ...data }); } catch {} };
+
+  logStep('main_account_save_started', { received_fields: Object.keys(payload).filter(k => !k.startsWith('__')), has_steamid64: Boolean(payload.steam_id64 || payload.steamid64), has_api_key: Boolean(payload.steam_web_api_key || payload.steam_api_key), has_bp_token: Boolean(payload.backpack_tf_access_token || payload.backpack_tf_token || payload.backpack_token), has_bp_api: Boolean(payload.backpack_tf_api_key || payload.backpack_api_key || payload.api_key) });
+
+  let existing = null;
+  try {
+    existing = readJson(MAIN_ACCOUNT_VAULT_PATH, null);
+  } catch {}
+  const existingAccount = (existing && existing.main_account) ? existing.main_account : {};
+  logStep('main_account_save_read_existing', { canonical_exists: Boolean(existing), existing_has_steamid64: Boolean(existingAccount.steam_id64) });
+
+  const built = buildMainAccountFromPayload({ ...payload, id: 'main', account_id: 'main', role: 'main' }, existingAccount);
+  const candidate = built.account;
+  if (payload.clear_steam_web_api_key || payload.clear_steam_api_key) delete candidate.steam_web_api_key;
+  if (payload.clear_backpack_tf_access_token || payload.clear_backpack_tf_api_key || payload.clear_backpack_token) { delete candidate.backpack_tf_access_token; delete candidate.backpack_tf_api_key; }
+
+  const receivedFields = { steam_id64: Boolean(payload.steam_id64 || payload.steamid64), steam_web_api_key: Boolean(payload.steam_web_api_key || payload.steam_api_key), backpack_tf_access_token: Boolean(payload.backpack_tf_access_token || payload.backpack_tf_token || payload.backpack_token), backpack_tf_api_key: Boolean(payload.backpack_tf_api_key || payload.backpack_api_key || payload.api_key) };
+  const keptExisting = { steam_id64: !receivedFields.steam_id64 && Boolean(existingAccount.steam_id64), steam_web_api_key: !receivedFields.steam_web_api_key && Boolean(existingAccount.steam_web_api_key), backpack_tf_access_token: !receivedFields.backpack_tf_access_token && Boolean(existingAccount.backpack_tf_access_token), backpack_tf_api_key: !receivedFields.backpack_tf_api_key && Boolean(existingAccount.backpack_tf_api_key) };
+  const updatedFields = Object.keys(receivedFields).filter(k => receivedFields[k]);
+  const clearedFields = ['clear_steam_web_api_key', 'clear_steam_api_key', 'clear_backpack_tf_access_token', 'clear_backpack_tf_api_key', 'clear_backpack_token'].filter(k => payload[k]);
+
+  const missing = [];
+  if (!candidate.steam_id64) missing.push('steamid64');
+  if (!candidate.steam_web_api_key) missing.push('steam_api_key');
+  if (!candidate.backpack_tf_access_token) missing.push('backpack_tf_access_token');
+  if (!candidate.backpack_tf_api_key) missing.push('backpack_tf_api_key');
+
+  logStep('main_account_save_merged', { missing, updated_fields: updatedFields, kept_existing: keptExisting, cleared_fields: clearedFields });
+
+  if (missing.length) {
+    traceStep('main-account.fast-save.validation_failed', { missing });
+    return { ok: false, version: APP_VERSION, saved: false, verified: false, save_verified: false, error: 'Missing required credential fields.', missing, trace_id: traceId, elapsed_ms: elapsed(), secrets_returned: false, save_trace: { trace_id: traceId, received_fields: receivedFields, kept_existing_fields: keptExisting, updated_fields: updatedFields, cleared_fields: clearedFields, current_step: 'validation_failed', canonical_path: path.basename(MAIN_ACCOUNT_VAULT_PATH), canonical_exists_before: Boolean(existing), canonical_exists_after: false, canonical_size_after: 0, verified_after_read: false, wrote_last_good: false, elapsed_ms: elapsed() } };
+  }
+
+  const canonicalExistsBefore = fs.existsSync(MAIN_ACCOUNT_VAULT_PATH);
+  const vaultPayload = { ok: true, version: APP_VERSION, updated_at: new Date().toISOString(), source: 'canonical_vault', main_account: candidate };
+
+  try {
+    logStep('main_account_save_write_tmp', { canonical_path: MAIN_ACCOUNT_VAULT_PATH });
+    atomicWriteJson(MAIN_ACCOUNT_VAULT_PATH, vaultPayload, 0o600);
+    logStep('main_account_save_rename_done', { canonical_path: MAIN_ACCOUNT_VAULT_PATH });
+  } catch (writeError) {
+    logStep('main_account_save_failed', { error: safeError(writeError), current_step: 'write_tmp' });
+    traceStep('main-account.fast-save.write_failed', { error: safeError(writeError) });
+    return { ok: false, version: APP_VERSION, saved: false, verified: false, save_verified: false, error: 'Failed to write canonical vault: ' + safeError(writeError), trace_id: traceId, elapsed_ms: elapsed(), secrets_returned: false, save_trace: { trace_id: traceId, received_fields: receivedFields, kept_existing_fields: keptExisting, updated_fields: updatedFields, cleared_fields: clearedFields, current_step: 'write_failed', canonical_path: path.basename(MAIN_ACCOUNT_VAULT_PATH), canonical_exists_before: canonicalExistsBefore, canonical_exists_after: false, canonical_size_after: 0, verified_after_read: false, wrote_last_good: false, elapsed_ms: elapsed() } };
+  }
+
+  let verifiedVault = null;
+  let canonicalSizeAfter = 0;
+  let verifiedAfterRead = false;
+  try {
+    verifiedVault = readJson(MAIN_ACCOUNT_VAULT_PATH, null);
+    const stat = fs.statSync(MAIN_ACCOUNT_VAULT_PATH);
+    canonicalSizeAfter = stat.size;
+    const va = verifiedVault && verifiedVault.main_account;
+    verifiedAfterRead = Boolean(va && va.steam_id64 && va.steam_web_api_key && va.backpack_tf_access_token && va.backpack_tf_api_key);
+    logStep('main_account_save_verified', { verified: verifiedAfterRead, canonical_size_after: canonicalSizeAfter });
+  } catch (verifyError) {
+    logStep('main_account_save_verified', { verified: false, error: safeError(verifyError) });
+  }
+
+  let wroteLastGood = false;
+  if (verifiedAfterRead) {
+    try {
+      atomicWriteJson(MAIN_ACCOUNT_LAST_GOOD_PATH, vaultPayload, 0o600);
+      wroteLastGood = true;
+      logStep('main_account_last_good_written', { last_good_path: MAIN_ACCOUNT_LAST_GOOD_PATH });
+    } catch {}
+    try {
+      mirrorMainAccountCompatibility(candidate);
+    } catch {}
+  }
+
+  const saveTrace = { trace_id: traceId, received_fields: receivedFields, kept_existing_fields: keptExisting, updated_fields: updatedFields, cleared_fields: clearedFields, current_step: verifiedAfterRead ? 'done' : 'verify_failed', canonical_path: path.basename(MAIN_ACCOUNT_VAULT_PATH), canonical_exists_before: canonicalExistsBefore, canonical_exists_after: fs.existsSync(MAIN_ACCOUNT_VAULT_PATH), canonical_size_after: canonicalSizeAfter, verified_after_read: verifiedAfterRead, wrote_last_good: wroteLastGood, elapsed_ms: elapsed() };
+  traceStep(verifiedAfterRead ? 'main-account.fast-save.done' : 'main-account.fast-save.verify_failed', saveTrace);
+  logStep('main_account_save_done', { verified: verifiedAfterRead, wrote_last_good: wroteLastGood, elapsed_ms: elapsed() });
+
+  const va = verifiedVault && verifiedVault.main_account;
+  return {
+    ok: verifiedAfterRead,
+    version: APP_VERSION,
+    saved: true,
+    verified: verifiedAfterRead,
+    save_verified: verifiedAfterRead,
+    trace_id: traceId,
+    elapsed_ms: elapsed(),
+    status: { steamid64: canonicalFieldWord(Boolean(va && va.steam_id64)), steam_api_key: canonicalFieldWord(Boolean(va && va.steam_web_api_key)), backpack_tf_access_token: canonicalFieldWord(Boolean(va && va.backpack_tf_access_token)), backpack_tf_api_key: canonicalFieldWord(Boolean(va && va.backpack_tf_api_key)), scope: 'main_only' },
+    readiness: (va && va.steam_id64 && va.steam_web_api_key && va.backpack_tf_access_token && va.backpack_tf_api_key) ? 'ready' : 'missing_credentials',
+    save_trace: saveTrace,
+    secrets_returned: false
+  };
+}
+
 function isolatedMainAccountSave(payload = {}, requestId = runtimeRequestId()) {
   const startedAt = Date.now();
   const traceId = payload.__save_trace_id || requestId;
@@ -12969,23 +13068,31 @@ async function handleApi(req, res, pathname) {
   if (pathname === '/api/main-account/status') {
     return json(res, 200, withProviderHealthStatus(canonicalMainAccountStatusResponse()));
   }
-  if (pathname === '/api/main-account/save') {
+  if (pathname === '/api/main-account/save' || pathname === '/api/main-account/save-local-only') {
     if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'Use POST.' });
     const traceId = runtimeRequestId();
-    runtimeLogger.info('main_account', 'route_enter', 'Main account save endpoint entered', { requestId: req.runtimeRequestId, trace_id: traceId, method: req.method, contentLength: req.headers && req.headers['content-length'] ? String(req.headers['content-length']) : null });
+    runtimeLogger.info('main_account', 'route_enter', 'Main account fast-save endpoint entered', { requestId: req.runtimeRequestId, trace_id: traceId, pathname, method: req.method, contentLength: req.headers && req.headers['content-length'] ? String(req.headers['content-length']) : null });
     const raw = await readBody(req);
     let parsed = {};
     try { parsed = raw ? JSON.parse(raw) : {}; } catch { runtimeLogger.warn('main_account', 'json_parse_failed', 'Main account save payload was invalid JSON', { requestId: req.runtimeRequestId, trace_id: traceId, bytes: Buffer.byteLength(raw || '', 'utf8') }); return json(res, 400, { ok: false, version: APP_VERSION, error: 'Invalid JSON.', trace_id: traceId, secrets_returned: false }); }
     parsed.__save_trace_id = traceId;
+    __saveInProgress = true;
+    const saveTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('save_timeout_1500ms')), 1500));
+    const saveWork = Promise.resolve().then(() => fastLocalMainAccountSave(parsed, req.runtimeRequestId || traceId));
+    let result;
     try {
-      const result = isolatedMainAccountSave(parsed, req.runtimeRequestId || traceId);
-      runtimeLogger.info('main_account', 'route_return', 'Main account save endpoint returned', { requestId: req.runtimeRequestId, trace_id: traceId, save_verified: result.save_verified, elapsed_ms: result.elapsed_ms, readiness: result.main_account && result.main_account.readiness });
-      return json(res, result.save_verified ? 200 : 400, result);
+      result = await Promise.race([saveWork, saveTimeout]);
     } catch (error) {
-      runtimeLogger.error('main_account', 'main-account.save.fail', 'Main account isolated save failed', runtimeErrorContext(error, { requestId: req.runtimeRequestId, trace_id: traceId }));
-      mainAccountSaveTrace('main-account.save.fail', { trace_id: traceId, error: safeError(error) });
+      __saveInProgress = false;
+      const isTimeout = error && error.message === 'save_timeout_1500ms';
+      runtimeLogger.error('main_account', isTimeout ? 'main_account_save_timeout' : 'main-account.save.fail', isTimeout ? 'Main account save timed out after 1500ms' : 'Main account fast save failed', runtimeErrorContext(error, { requestId: req.runtimeRequestId, trace_id: traceId }));
+      mainAccountSaveTrace('main-account.fast-save.fail', { trace_id: traceId, error: safeError(error), timed_out: isTimeout });
+      if (isTimeout) return json(res, 504, { ok: false, version: APP_VERSION, saved: false, verified: false, save_verified: false, error: 'Save timed out after 1500ms. The server may be busy. Try again.', trace_id: traceId, timed_out: true, secrets_returned: false });
       return json(res, 500, { ok: false, version: APP_VERSION, saved: false, verified: false, save_verified: false, error: safeError(error), trace_id: traceId, secrets_returned: false });
     }
+    __saveInProgress = false;
+    runtimeLogger.info('main_account', 'route_return', 'Main account fast-save endpoint returned', { requestId: req.runtimeRequestId, trace_id: traceId, save_verified: result.save_verified, elapsed_ms: result.elapsed_ms, readiness: result.readiness });
+    return json(res, result.save_verified ? 200 : 400, result);
   }
   if (pathname === '/api/main-account/save-trace') {
     return json(res, 200, readJson(MAIN_ACCOUNT_SAVE_TRACE_PATH, { ok: true, version: APP_VERSION, events: [], hint: 'No save trace has been written yet.' }));
@@ -13587,6 +13694,7 @@ function startScheduler() {
   runtimeLogger.info('startup', 'scheduler_started', 'Runtime scheduler started', { intervalMs: 60000 });
   let tickRunning = false;
   setInterval(() => {
+    if (__saveInProgress) { runtimeLogger.info('scheduler', 'scheduler_skipped_save_in_progress', 'Scheduler tick skipped: credential save in progress'); return; }
     const options = getOptions();
     if (tickRunning) return;
     tickRunning = true;
