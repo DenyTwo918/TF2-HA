@@ -1,6 +1,6 @@
 {
   "name": "tf2-trading-hub-addon",
-  "version": "5.13.51",
+  "version": "5.13.52",
   "private": true,
   "main": "dist/server.js",
   "scripts": {
@@ -8,5 +8,5 @@
     "start": "node dist/server.js"
   },
   "dependencies": {},
-  "description": "TF2 Trading Hub: maintainer hard isolation, no event loop block, independent 2s watchdog, heartbeat, per-stage timeouts."
+  "description": "TF2 Trading Hub: auto classifieds maintainer disabled by default; UI version sync; extended version-audit endpoint."
 }
