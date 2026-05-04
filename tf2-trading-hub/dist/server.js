@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const APP_VERSION = '5.13.51';
+const APP_VERSION = '5.13.52';
 const APP_NAME = 'TF2 Trading Hub';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -1935,7 +1935,7 @@ function getOptions() {
     backpack_tf_enabled: bool(options.backpack_tf_enabled, true),
     backpack_tf_access_token: String(credentialAccount.backpack_tf_access_token || options.backpack_tf_access_token || '').trim(),
     backpack_tf_api_key: String(credentialAccount.backpack_tf_api_key || options.backpack_tf_api_key || '').trim(),
-    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.51').trim(),
+    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.52').trim(),
     backpack_tf_base_url: String(options.backpack_tf_base_url || 'https://backpack.tf').replace(/\/$/, ''),
     backpack_tf_cache_ttl_minutes: clamp(options.backpack_tf_cache_ttl_minutes, 30, 1, 1440),
     backpack_tf_retry_count: clamp(options.backpack_tf_retry_count, 2, 0, 5),
@@ -3608,7 +3608,7 @@ class BackpackTfV2ListingManager {
     return configured.endsWith('/api') ? configured : `${configured}/api`;
   }
   headers(authMode = 'token') {
-    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.51' };
+    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.52' };
     if (authMode === 'token' && this.options.backpack_tf_access_token) headers['X-Auth-Token'] = this.options.backpack_tf_access_token;
     if (authMode === 'bearer' && this.options.backpack_tf_access_token) headers.authorization = `Bearer ${this.options.backpack_tf_access_token}`;
     if (authMode === 'api_key_header' && this.options.backpack_tf_api_key) headers['x-api-key'] = this.options.backpack_tf_api_key;
@@ -8281,7 +8281,7 @@ class SteamInventorySyncService {
       let accepted = null;
       let lastFailure = null;
       for (const variant of this.inventoryUrls(options.steam_id64, startAssetId)) {
-        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.51' } });
+        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.52' } });
         const body = result.body || {};
         const parsed = result.ok ? this.extractInventoryPayload(body) : { ok: false, error: result.error || body.error || body.raw || `HTTP ${result.status}` };
         attempts.push({
@@ -11914,6 +11914,7 @@ class PersistentClassifiedsMaintainerService {
         text: enabled ? `Enabled · next run ${dueInSeconds === 0 ? 'now' : `in ${dueInSeconds}s`} · cap-fill ${fillTargets.active_total}/${fillTargets.cap} · target buy ${fillTargets.target_buy} · max ${effectiveMax}/cycle` : 'Disabled by sliders or safety gates',
         last: lastResult ? this.summarizeLastResult(lastResult) : null
       },
+      auto_run_enabled: options.persistent_classifieds_maintainer_auto_run_enabled === true,
       slider_gate: {
         persistent_classifieds_maintainer_enabled: options.persistent_classifieds_maintainer_enabled !== false,
         allow_guarded_backpack_publish: Boolean(options.allow_guarded_backpack_publish),
@@ -12618,9 +12619,16 @@ function buildVersionAudit() {
     versionEntry('frontend_banner', extractFirst(frontendText, /Build\s+([^\s<]+)\s+loaded/), expected)
   ];
   const stale = entries.filter(entry => !entry.ok);
+  const getEntry = (key) => (entries.find(e => e.name === key) || {}).value || null;
   return {
     ok: stale.length === 0,
+    all_match: stale.length === 0,
     version: APP_VERSION,
+    backend_version: APP_VERSION,
+    frontend_build_label: getEntry('frontend_banner'),
+    config_version: getEntry('config'),
+    package_version: getEntry('package'),
+    runsh_version: getEntry('run_script'),
     expected,
     checked_at: new Date().toISOString(),
     entries,
@@ -14267,7 +14275,11 @@ function startScheduler() {
         }
         // 5.13.50: second preflight — in case scheduled_pipeline just released the lock via timeout.
         try { releaseStaleOperationIfNeeded('scheduler_preflight_post_pipeline'); } catch {}
-        if (classifiedsMaintainer.due()) {
+        // 5.13.52: Auto maintainer is disabled by default. Requires explicit opt-in.
+        const maintainerAutoRunEnabled = options.persistent_classifieds_maintainer_auto_run_enabled === true;
+        if (classifiedsMaintainer.due() && !maintainerAutoRunEnabled) {
+          runtimeLogger.info('scheduler', 'maintainer_auto_run_disabled', 'Auto maintainer skipped: persistent_classifieds_maintainer_auto_run_enabled is not true. Use Maintain now manually.', {});
+        } else if (classifiedsMaintainer.due()) {
           if (__lastMaintainerTimeoutAt && Date.now() - __lastMaintainerTimeoutAt < 600000) {
             const cooldownMs = Date.now() - __lastMaintainerTimeoutAt;
             runtimeLogger.warn('scheduler', 'maintainer_skipped_recent_timeout', 'Maintainer skipped: timed out within last 10 minutes', { lastTimeoutAt: new Date(__lastMaintainerTimeoutAt).toISOString(), elapsed_ms: cooldownMs });
