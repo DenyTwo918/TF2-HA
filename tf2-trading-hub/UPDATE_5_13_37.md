@@ -1,4 +1,4 @@
-# 5.13.41 – run.sh Hotfix
+# 5.13.42 – Price Schema Deep Sync Fix
 
 - Rebuilds the repository package with preserved LF line endings.
 - Aligns Home Assistant version markers across config.yaml, build.yaml, Dockerfiles, run.sh, package.json, backend and UI files.

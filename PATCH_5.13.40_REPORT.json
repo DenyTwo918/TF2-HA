@@ -1,11 +1,11 @@
 {
   "ok": true,
-  "version": "5.13.41",
+  "version": "5.13.42",
   "name": "run.sh Hotfix",
   "output": "TF2-HA-5_13_40-runsh-hotfix-full.zip",
   "fixes": [
     "Fixed /run.sh unterminated quoted string by rewriting the script with explicit printf lines.",
-    "Bumped all active runtime version markers to 5.13.41.",
+    "Bumped all active runtime version markers to 5.13.42.",
     "Preserved provider-readiness logging that shows saved credentials separately from Backpack.tf token/API failures."
   ]
 }

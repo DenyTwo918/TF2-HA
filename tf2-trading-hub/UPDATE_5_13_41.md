@@ -1,6 +1,6 @@
-# TF2 Trading Hub 5.13.41 – Backpack API Key / Price Schema Fix
+# TF2 Trading Hub 5.13.42 – Price Schema Deep Sync Fix
 
-This patch fixes the provider readiness split discovered in the 5.13.41 diagnostic bundle.
+This patch fixes the provider readiness split discovered in the 5.13.42 diagnostic bundle.
 
 ## Changes
 

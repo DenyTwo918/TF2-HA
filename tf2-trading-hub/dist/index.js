@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const APP_VERSION = '5.13.41';
+const APP_VERSION = '5.13.43';
 const APP_NAME = 'TF2 Trading Hub';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -21,6 +21,7 @@ const PRICING_REPORT_PATH = path.join(DATA_DIR, 'steam-companion-pricing-report.
 const PROVIDER_STATE_PATH = path.join(DATA_DIR, 'steam-companion-provider-state.json');
 const BACKPACK_LISTINGS_PATH = path.join(DATA_DIR, 'steam-companion-backpack-listings.json');
 const BACKPACK_PRICE_SCHEMA_PATH = path.join(DATA_DIR, 'tf2-hub-backpack-price-schema.json');
+const BACKPACK_PRICE_SCHEMA_DEBUG_PATH = path.join(DATA_DIR, 'tf2-hub-backpack-price-schema-debug.json');
 const STEAM_ITEM_SCHEMA_PATH = path.join(DATA_DIR, 'tf2-hub-steam-item-schema.json');
 const MARKET_SCANNER_PATH = path.join(DATA_DIR, 'tf2-hub-market-scanner.json');
 const LISTING_PLAN_PATH = path.join(DATA_DIR, 'steam-companion-listing-plan.json');
@@ -246,7 +247,7 @@ function writeJson(filePath, value) {
   fs.renameSync(tmp, filePath);
   __notifyWatchers(filePath);
 }
-// 5.13.41: cache invalidation hooks.  When a file the publish wizard reads
+// 5.13.43: cache invalidation hooks.  When a file the publish wizard reads
 // gets rewritten, we drop the cached status so the next request rebuilds.
 const __writeWatchers = new Map();
 function __notifyWatchers(filePath) {
@@ -258,7 +259,7 @@ function watchJsonWrite(filePath, fn) {
   if (!__writeWatchers.has(filePath)) __writeWatchers.set(filePath, new Set());
   __writeWatchers.get(filePath).add(fn);
 }
-// 5.13.41: writes only when the serialized value actually changed.  Uses an
+// 5.13.43: writes only when the serialized value actually changed.  Uses an
 // in-memory hash cache to avoid the round-trip read; falls back to a one-time
 // disk hash when the process restarts.  Eliminates the disk-I/O storm caused by
 // the dashboard re-writing PUBLISH_WIZARD_PATH every 8s with identical data.
@@ -299,7 +300,7 @@ function bool(value, fallback = false) {
   return fallback;
 }
 
-// ── 5.13.41 – Runtime Event Logger ─────────────────────────────────────
+// ── 5.13.43 – Runtime Event Logger ─────────────────────────────────────
 const RUNTIME_LOG_LEVELS = { error: 0, warn: 1, info: 2, debug: 3, audit: 2 };
 const RUNTIME_SECRET_KEY_RE = /(token|secret|password|passwd|cookie|session|authorization|steamloginsecure|shared_secret|identity_secret|refresh|mafile|api[_-]?key|steam_web_api_key|steam_api_key|backpack_tf_access_token|backpack_tf_api_key|access_token|sda_password)/i;
 function runtimeLoggerOptions() {
@@ -774,7 +775,7 @@ function canonicalMainAccountStatusResponse(extra = {}) {
   try { runtimeLogVaultStatus('status_read', response.main_account, { endpoint: 'main-account/status', vault_exists: vaultExists, source }); } catch {}
   return response;
 }
-// ── 5.13.41 – Provider readiness health ───────────────────────────────
+// ── 5.13.43 – Provider readiness health ───────────────────────────────
 function providerHealthText(value, depth = 0, seen = new WeakSet()) {
   try {
     if (value === null || value === undefined) return '';
@@ -839,7 +840,7 @@ function providerHealthLastBackpackFailure() {
     const events = readJsonLines(AUDIT_PATH, 1000).reverse();
     return events.find(event => {
       const text = providerHealthText(event).toLowerCase();
-      return text.includes('backpack') && (text.includes('failed') || text.includes('invalid') || text.includes('api_key_missing') || text.includes('401') || text.includes('unauthorized'));
+      return text.includes('backpack') && (text.includes('failed') || text.includes('invalid') || text.includes('api_key_missing') || text.includes('prices_empty') || text.includes('price_schema') || text.includes('401') || text.includes('unauthorized'));
     }) || null;
   } catch { return null; }
 }
@@ -868,7 +869,7 @@ function providerHealthState() {
     providerHealthCountCollection(priceSchemaRaw, ['items', 'prices', 'schema', 'entries', 'results'])
   );
   const listingCachePriceCount = providerHealthNumber(listingsRaw, ['prices_count', 'summary.prices_count']);
-  // 5.13.41: do not treat the legacy Steam offer pricelist as Backpack.tf market price schema.
+  // 5.13.43: do not treat the legacy Steam offer pricelist as Backpack.tf market price schema.
   // That file can contain a few trade-review entries and caused a false "prices ready" state with 0 schema prices.
   const priceCount = Math.max(priceSchemaCount, listingCachePriceCount);
   const inventoryItems = Math.max(
@@ -954,6 +955,7 @@ function providerHealthState() {
       provider_state: providerHealthFileMeta(PROVIDER_STATE_PATH),
       backpack_listings: providerHealthFileMeta(BACKPACK_LISTINGS_PATH),
       backpack_price_schema: providerHealthFileMeta(BACKPACK_PRICE_SCHEMA_PATH),
+        backpack_price_schema_debug: providerHealthFileMeta(BACKPACK_PRICE_SCHEMA_DEBUG_PATH),
       pricelist: providerHealthFileMeta(PRICELIST_PATH),
       inventory: providerHealthFileMeta(HUB_INVENTORY_PATH),
       audit: providerHealthFileMeta(AUDIT_PATH)
@@ -1382,7 +1384,7 @@ function getOptions() {
     backpack_tf_enabled: bool(options.backpack_tf_enabled, true),
     backpack_tf_access_token: String(credentialAccount.backpack_tf_access_token || options.backpack_tf_access_token || '').trim(),
     backpack_tf_api_key: String(credentialAccount.backpack_tf_api_key || options.backpack_tf_api_key || '').trim(),
-    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.41').trim(),
+    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.43').trim(),
     backpack_tf_base_url: String(options.backpack_tf_base_url || 'https://backpack.tf').replace(/\/$/, ''),
     backpack_tf_cache_ttl_minutes: clamp(options.backpack_tf_cache_ttl_minutes, 30, 1, 1440),
     backpack_tf_retry_count: clamp(options.backpack_tf_retry_count, 2, 0, 5),
@@ -3055,7 +3057,7 @@ class BackpackTfV2ListingManager {
     return configured.endsWith('/api') ? configured : `${configured}/api`;
   }
   headers(authMode = 'token') {
-    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.41' };
+    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.43' };
     if (authMode === 'token' && this.options.backpack_tf_access_token) headers['X-Auth-Token'] = this.options.backpack_tf_access_token;
     if (authMode === 'bearer' && this.options.backpack_tf_access_token) headers.authorization = `Bearer ${this.options.backpack_tf_access_token}`;
     if (authMode === 'api_key_header' && this.options.backpack_tf_api_key) headers['x-api-key'] = this.options.backpack_tf_api_key;
@@ -3074,7 +3076,16 @@ class BackpackTfV2ListingManager {
   cacheFresh() {
     const cache = readJson(BACKPACK_LISTINGS_PATH, { ok: false });
     if (!cache.ok || !cache.updated_at) return false;
-    return Date.now() - Date.parse(cache.updated_at) < this.options.backpack_tf_cache_ttl_minutes * 60 * 1000;
+    const fresh = Date.now() - Date.parse(cache.updated_at) < this.options.backpack_tf_cache_ttl_minutes * 60 * 1000;
+    if (!fresh) return false;
+    // 5.13.43: a fresh listings cache must not block a price-schema retry.
+    // If an API key is saved and we still have no Backpack price schema, force a real provider sync.
+    if (this.options.backpack_tf_api_key) {
+      const schema = readJson(BACKPACK_PRICE_SCHEMA_PATH, { ok: false, prices: [], prices_count: 0 });
+      const schemaCount = Math.max(Number(schema.prices_count || 0), Array.isArray(schema.prices) ? schema.prices.length : 0, Number(cache.prices_count || 0));
+      if (schemaCount <= 0) return false;
+    }
+    return true;
   }
   extractListings(body) {
     if (!body || typeof body !== 'object') return [];
@@ -3229,6 +3240,26 @@ class BackpackTfV2ListingManager {
     runtimeLogger.warn('backpack_tf', 'classifieds_fetch_failed', 'Backpack.tf account listings fetch failed', { attempts: attempts.length, lastStatus: attempts.at(-1)?.status || null, error: attempts.at(-1)?.error || 'Backpack.tf account listings sync failed.', durationMs: Date.now() - startedAt });
     return { ok: false, stage: 'account_listings_failed', attempts, error: attempts.at(-1)?.error || 'Backpack.tf account listings sync failed.' };
   }
+  priceSchemaBodyShape(body) {
+    const response = body && (body.response || body);
+    const rawItems = response && (response.items || response.prices || response.data);
+    const itemNames = rawItems && typeof rawItems === 'object' && !Array.isArray(rawItems) ? Object.keys(rawItems).slice(0, 5) : [];
+    const firstName = itemNames[0] || null;
+    const first = firstName ? rawItems[firstName] : null;
+    return {
+      top_keys: body && typeof body === 'object' ? Object.keys(body).slice(0, 20) : [],
+      response_keys: response && typeof response === 'object' ? Object.keys(response).slice(0, 20) : [],
+      success: response && Object.prototype.hasOwnProperty.call(response, 'success') ? response.success : (body && body.success),
+      message: response && response.message ? String(response.message).slice(0, 300) : (body && body.message ? String(body.message).slice(0, 300) : null),
+      item_container_type: Array.isArray(rawItems) ? 'array' : typeof rawItems,
+      item_count_hint: rawItems && typeof rawItems === 'object' && !Array.isArray(rawItems) ? Object.keys(rawItems).length : 0,
+      sample_item_names: itemNames,
+      first_item_keys: first && typeof first === 'object' ? Object.keys(first).slice(0, 20) : []
+    };
+  }
+  redactBackpackSecretUrl(url) {
+    return String(url || '').replace(/([?&](?:key|token)=)[^&]+/ig, '$1[redacted]');
+  }
   async syncPriceSchema() {
     const startedAt = Date.now();
     runtimeLogger.info('backpack_tf', 'pricelist_sync_start', 'Backpack.tf price schema sync started', { hasApiKey: Boolean(this.options.backpack_tf_api_key) });
@@ -3236,16 +3267,62 @@ class BackpackTfV2ListingManager {
       runtimeLogger.warn('backpack_tf', 'pricelist_sync_failed', 'Backpack.tf price schema skipped: API key missing', { stage: 'api_key_missing' });
       return { ok: false, skipped: true, stage: 'api_key_missing', error: 'Backpack.tf API key missing. Price schema sync skipped.' };
     }
-    const url = this.withApiKey(`${this.apiBase()}/IGetPrices/v4?raw=1`);
-    const result = await fetchJsonHardened('backpack.tf', url, this.options, { headers: this.headers('api_key_header') });
-    if (!result.ok) {
-      runtimeLogger.warn('backpack_tf', 'pricelist_sync_failed', 'Backpack.tf price schema sync failed', { status: result.status, error: result.error || result.body?.message || result.body?.raw || `HTTP ${result.status}`, durationMs: Date.now() - startedAt });
-      return { ok: false, stage: 'prices_failed', status: result.status, error: result.error || result.body?.message || result.body?.raw || `HTTP ${result.status}` };
+    const variants = [];
+    const pushVariant = (label, rawMode, baseUrl, authMode = 'query') => {
+      const url = this.withApiKey(`${baseUrl.replace(/\/$/, '')}/IGetPrices/v4?raw=${rawMode}`);
+      variants.push({ label, rawMode, url, init: { headers: this.headers(authMode === 'header' ? 'api_key_header' : 'none') } });
+    };
+    pushVariant('configured_query_raw2', 2, this.apiBase(), 'query');
+    pushVariant('configured_query_raw1', 1, this.apiBase(), 'query');
+    pushVariant('backpack_tf_query_raw2', 2, 'https://backpack.tf/api', 'query');
+    pushVariant('api_backpack_tf_query_raw2', 2, 'https://api.backpack.tf/api', 'query');
+    pushVariant('configured_header_plus_query_raw2', 2, this.apiBase(), 'header');
+
+    const attempts = [];
+    let lastError = null;
+    for (const variant of variants) {
+      const result = await fetchJsonHardened('backpack.tf', variant.url, this.options, variant.init);
+      const shape = this.priceSchemaBodyShape(result.body);
+      const response = result.body && (result.body.response || result.body);
+      const successValue = response && Object.prototype.hasOwnProperty.call(response, 'success') ? response.success : undefined;
+      const message = response && response.message ? String(response.message) : (result.body && result.body.message ? String(result.body.message) : null);
+      const prices = result.ok ? this.extractPrices(result.body) : [];
+      const attempt = {
+        label: variant.label,
+        url: this.redactBackpackSecretUrl(variant.url),
+        ok: Boolean(result.ok && prices.length > 0),
+        http_ok: Boolean(result.ok),
+        status: result.status,
+        content_type: result.contentType || null,
+        success: successValue,
+        prices_extracted: prices.length,
+        shape,
+        error: result.ok ? (prices.length ? null : (message || 'HTTP 200 but no usable prices were extracted from the response.')) : (result.error || message || `HTTP ${result.status}`)
+      };
+      attempts.push(attempt);
+      if (result.ok && (String(successValue) === '0' || successValue === 0 || successValue === false)) {
+        lastError = message || 'Backpack.tf API returned success=0.';
+        runtimeLogger.warn('backpack_tf', 'pricelist_sync_attempt_empty', 'Backpack.tf price schema attempt returned success=0', { label: variant.label, status: result.status, message: lastError });
+        continue;
+      }
+      if (result.ok && prices.length > 0) {
+        const payload = { ok: true, updated_at: new Date().toISOString(), source: 'backpack_tf_IGetPrices_v4', auth: 'api_key_query_param', raw_mode: variant.rawMode, prices_count: prices.length, prices };
+        writeJson(BACKPACK_PRICE_SCHEMA_PATH, payload);
+        writeJson(BACKPACK_PRICE_SCHEMA_DEBUG_PATH, { ok: true, updated_at: payload.updated_at, source_url: this.redactBackpackSecretUrl(variant.url), selected_attempt: attempt, attempts: attempts.slice(-5) });
+        runtimeLogger.info('backpack_tf', 'pricelist_loaded', 'Backpack.tf price schema loaded', { pricesCount: prices.length, authMode: variant.label, durationMs: Date.now() - startedAt });
+        appendActionFeed('backpack_tf_price_schema_loaded', { prices: prices.length, auth_mode: variant.label, raw: variant.rawMode });
+        return { ok: true, source_url: this.redactBackpackSecretUrl(variant.url), prices_count: prices.length, price_schema_saved: true, sample: prices.slice(0, 20), attempts };
+      }
+      lastError = attempt.error;
+      runtimeLogger.warn('backpack_tf', 'pricelist_sync_attempt_empty', 'Backpack.tf price schema attempt produced no prices', { label: variant.label, status: result.status, pricesExtracted: prices.length, success: successValue, message: message || null });
+      // If the request was hard-denied, trying the other host usually will not help, but keep one more raw mode attempt useful.
     }
-    const prices = this.extractPrices(result.body);
-    writeJson(BACKPACK_PRICE_SCHEMA_PATH, { ok: true, updated_at: new Date().toISOString(), source: 'backpack_tf_IGetPrices_v4', prices_count: prices.length, prices });
-    runtimeLogger.info('backpack_tf', 'pricelist_loaded', 'Backpack.tf price schema loaded', { pricesCount: prices.length, durationMs: Date.now() - startedAt });
-    return { ok: true, source_url: url.replace(/([?&]key=)[^&]+/i, '$1[redacted]'), prices_count: prices.length, price_schema_saved: true, sample: prices.slice(0, 20) };
+    const debug = { ok: false, updated_at: new Date().toISOString(), version: APP_VERSION, stage: 'prices_empty_or_failed', error: lastError || 'Backpack.tf price schema sync returned no usable prices.', attempts, hint: 'Backpack.tf IGetPrices/v4 should be called with the API key as key=... query parameter. Check whether the API key is valid/elevated and whether the response body contains success=0/message.' };
+    writeJson(BACKPACK_PRICE_SCHEMA_DEBUG_PATH, debug);
+    this.audit.write('backpack_tf_price_schema_sync_failed', { stage: debug.stage, attempts: attempts.length, error: debug.error, last_status: attempts.at(-1)?.status || null, prices: 0 });
+    appendActionFeed('backpack_tf_price_schema_sync_failed', { stage: debug.stage, attempts: attempts.length, error: debug.error, prices: 0 });
+    runtimeLogger.warn('backpack_tf', 'pricelist_sync_failed', 'Backpack.tf price schema sync failed or returned no prices', { attempts: attempts.length, error: debug.error, durationMs: Date.now() - startedAt });
+    return { ok: false, stage: 'prices_empty_or_failed', status: attempts.at(-1)?.status || 0, error: debug.error, attempts };
   }
   async syncListings(force = false) {
     const startedAt = Date.now();
@@ -3272,7 +3349,7 @@ class BackpackTfV2ListingManager {
     const listings = listingsResult.ok ? listingsResult.listings : [];
     const cache = {
       ok: Boolean(listingsResult.ok || pricesResult.ok),
-      stage: listingsResult.ok ? 'account_listings_synced' : (pricesResult.ok ? 'price_schema_synced_only' : 'sync_failed'),
+      stage: listingsResult.ok && pricesResult.ok ? 'account_listings_and_prices_synced' : (listingsResult.ok ? 'account_listings_synced_price_schema_missing' : (pricesResult.ok ? 'price_schema_synced_only' : 'sync_failed')),
       updated_at: new Date().toISOString(),
       source: 'ui_credential_vault',
       account_scope: this.options.active_account_id || 'main',
@@ -3280,12 +3357,12 @@ class BackpackTfV2ListingManager {
       listings_count: listings.length,
       listings_summary: this.summarizeListings(listings),
       listings,
-      prices_ok: Boolean(pricesResult.ok),
+      prices_ok: Boolean(pricesResult.ok && Number(pricesResult.prices_count || 0) > 0),
       prices_count: Number(pricesResult.prices_count || 0),
       prices_sample: pricesResult.sample || [],
-      attempts: [...(listingsResult.attempts || []), ...(pricesResult.ok ? [{ label: 'IGetPrices/v4', ok: true, prices: pricesResult.prices_count }] : (pricesResult.skipped ? [{ label: 'IGetPrices/v4', skipped: true, error: pricesResult.error }] : [{ label: 'IGetPrices/v4', ok: false, status: pricesResult.status, error: pricesResult.error }]))],
+      attempts: [...(listingsResult.attempts || []), ...(pricesResult.attempts || (pricesResult.ok ? [{ label: 'IGetPrices/v4', ok: true, prices: pricesResult.prices_count }] : (pricesResult.skipped ? [{ label: 'IGetPrices/v4', skipped: true, error: pricesResult.error }] : [{ label: 'IGetPrices/v4', ok: false, status: pricesResult.status, error: pricesResult.error }])))],
       errors: [listingsResult.ok ? null : listingsResult.error, pricesResult.ok || pricesResult.skipped ? null : pricesResult.error].filter(Boolean),
-      guidance: listingsResult.ok && pricesResult.ok ? 'Account listings and price schema are ready.' : (listingsResult.ok && !pricesResult.ok ? 'Account listings are ready, but price schema is missing. Paste/save the Backpack.tf API key and run Sync Backpack.tf again.' : (pricesResult.ok ? 'Only public price schema synced. Save a Backpack.tf user access token in UI to read your account listings.' : 'Backpack.tf sync failed. Check access token/API key and provider attempts below.'))
+      guidance: listingsResult.ok && pricesResult.ok ? 'Account listings and price schema are ready.' : (listingsResult.ok && !pricesResult.ok ? 'Account listings are ready, but price schema is missing. Run Local Workflow again; if it stays empty, open Action Feed / Debug status and check backpack_tf_price_schema_sync_failed details.' : (pricesResult.ok ? 'Only public price schema synced. Save a Backpack.tf user access token in UI to read your account listings.' : 'Backpack.tf sync failed. Check access token/API key and provider attempts below.'))
     };
     writeJson(BACKPACK_LISTINGS_PATH, cache);
     this.audit.write(cache.ok ? 'backpack_tf_sync_completed' : 'backpack_tf_sync_failed', { stage: cache.stage, listings: cache.listings_count, prices: cache.prices_count, errors: cache.errors });
@@ -4208,7 +4285,7 @@ class DataPersistenceMigrationService {
     return { ok: true, exported_at: new Date().toISOString(), schema_version: DATA_SCHEMA_VERSION, payload };
   }
 }
-// 5.13.41: bounded redactor.  The unbounded version walked the entire market
+// 5.13.43: bounded redactor.  The unbounded version walked the entire market
 // classifieds mirror (1000+ items, deeply nested) on every dashboard poll, which
 // pegged CPU and ballooned RAM on small Home Assistant hosts.  We now cap depth,
 // array length, and key count, returning a placeholder past the limits.  Secret
@@ -4875,7 +4952,7 @@ class HubListingDraftService {
     } catch (err) {
       providerStatus = 'error';
       providerSummary = safeError(err);
-      friendly = String(safeError(err)).includes('apiBase is not a function') ? 'Internal publish executor bug: apiBase helper was not wired. Update to 5.13.41 or newer.' : friendlyPublishError('network_or_timeout', safeError(err));
+      friendly = String(safeError(err)).includes('apiBase is not a function') ? 'Internal publish executor bug: apiBase helper was not wired. Update to 5.13.43 or newer.' : friendlyPublishError('network_or_timeout', safeError(err));
     }
     const syncedProviderPayloadPreview = {
       ...(built.draft.provider_payload_preview || {}),
@@ -6181,7 +6258,7 @@ function buildPublishWizardStatus() {
   return result;
 }
 
-// 5.13.41 – cached + lite publish wizard status.
+// 5.13.43 – cached + lite publish wizard status.
 //
 // The dashboard polls /api/publish-wizard/status every 8s.  The full builder
 // reads ~10 JSON files, runs 12+ status sub-builders, walks each result through
@@ -7619,7 +7696,7 @@ class SteamInventorySyncService {
       let accepted = null;
       let lastFailure = null;
       for (const variant of this.inventoryUrls(options.steam_id64, startAssetId)) {
-        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.41' } });
+        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.43' } });
         const body = result.body || {};
         const parsed = result.ok ? this.extractInventoryPayload(body) : { ok: false, error: result.error || body.error || body.raw || `HTTP ${result.status}` };
         attempts.push({
@@ -13257,7 +13334,7 @@ async function handleApi(req, res, pathname) {
   }
   if (pathname === '/api/publish-wizard/prepare-key-to-metal' && (req.method === 'POST' || req.method === 'GET')) return json(res, 200, prepareKeyToMetalDraft(getOptions(), auditService));
   if (pathname === '/api/most-traded/status' || pathname === '/api/offer-booster/status' || pathname === '/api/auto-list-anything/status') return json(res, 200, buildMostTradedAndKeysStatus(getOptions()));
-  // 5.13.41: cached status + lite polling endpoint.  Lite is small and skips
+  // 5.13.43: cached status + lite polling endpoint.  Lite is small and skips
   // every heavy sub-status; it is what the live dashboard polls every few
   // seconds.  The full /status response is served from a short-TTL memory cache
   // (PUBLISH_WIZARD_CACHE_TTL_MS) so opening the panel does not peg CPU.
@@ -13424,5 +13501,5 @@ __server.listen(PORT, HOST, () => {
     runtimeLogger.error('startup', 'vault_loaded_failed', 'Main account vault startup status failed', runtimeErrorContext(error));
   }
   runtimeLogger.info('startup', 'config_loaded', 'Runtime options loaded', runtimeLoggerOptions());
-  console.log('[tf2-hub] 5.13.41 Backpack API Key / Price Schema Fix');
+  console.log('[tf2-hub] 5.13.43 Main Account Restart Persistence Guard');
 });

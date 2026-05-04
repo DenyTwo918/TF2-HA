@@ -1,4 +1,4 @@
-# TF2 Trading Hub 5.13.41 – run.sh Hotfix
+# TF2 Trading Hub 5.13.42 – Price Schema Deep Sync Fix
 
 Adds provider health that separates stored Main account credentials from live Backpack.tf readiness.
 

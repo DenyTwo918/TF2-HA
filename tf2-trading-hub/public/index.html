@@ -10,9 +10,9 @@
   <main class="shell">
     <section class="hero hubHero">
       <div>
-        <p class="eyebrow">Home Assistant add-on · 5.13.41 · run.sh Hotfix</p>
+        <p class="eyebrow">Home Assistant add-on · 5.13.43 · Main Account Restart Persistence Guard</p>
         <h1>TF2 Trading Hub</h1>
-        <p class="lead">Production dashboard: Backpack.tf access token and API key are handled separately so listings and price schema readiness are clear.</p><div class="buildBanner"><b>Build 5.13.41 loaded</b><span>Backpack access token saves own listings; Backpack API key unlocks IGetPrices/v4 price schema and market scanner.</span></div>
+        <p class="lead">Production dashboard: Main account persistence is verified after restart; Backpack price schema diagnostics remain enabled.</p><div class="buildBanner"><b>Build 5.13.43 loaded</b><span>Main account save now writes canonical + last-good mirrors and self-heals status after restart.</span></div>
         <div class="heroActions diagnosticFirstActions">
           <button id="runDiagnosticBundle" class="primary">Diagnostic bundle for assistant</button>
           <button id="refreshAll">Refresh cockpit</button><button id="toggleSimpleUi">Show advanced UI</button>
@@ -152,20 +152,20 @@
 
     <section class="grid two"><article class="card"><div class="cardHead split"><h2>Action Feed</h2><button id="refreshFeed">Refresh</button></div><div id="actionFeed" class="feed">No feed yet.</div></article><article class="card"><div class="cardHead split"><h2>Logs</h2><div class="buttonRow"><button id="loadPlan">Load listing plan</button><button id="loadAcceptLog">Accept log</button><button id="loadAudit">Audit</button></div></div><pre id="logs"></pre></article></section>
 
-    <!-- 5.13.41 – Local Workflow + Release Check -->
+    <!-- 5.13.43 – Local Workflow + Release Check -->
     <section class="grid two workflowGrid">
       <article class="card">
-        <div class="cardHead split"><div><p class="eyebrow">5.13.41</p><h2>Local Workflow</h2></div><div class="buttonRow"><button id="runLocalWorkflow" class="primary">▶ Run Local Workflow</button></div></div>
+        <div class="cardHead split"><div><p class="eyebrow">5.13.43</p><h2>Local Workflow</h2></div><div class="buttonRow"><button id="runLocalWorkflow" class="primary">▶ Run Local Workflow</button></div></div>
         <p class="muted">Runs: provider sync → inventory sync → market scanner → planning queue → listing drafts → diagnostic triage.</p>
         <div id="localWorkflow">Not run yet.</div>
       </article>
       <article class="card">
-        <div class="cardHead split"><div><p class="eyebrow">5.13.41</p><h2>Release Check</h2></div><div class="buttonRow"><button id="runReleaseCheck">Run Release Check</button><button id="runForbiddenFieldsAudit">Removed Field Audit</button></div></div>
+        <div class="cardHead split"><div><p class="eyebrow">5.13.43</p><h2>Release Check</h2></div><div class="buttonRow"><button id="runReleaseCheck">Run Release Check</button><button id="runForbiddenFieldsAudit">Removed Field Audit</button></div></div>
         <div id="releaseCheck">Not run yet.</div>
       </article>
     </section>
 
-    <!-- 5.13.41 – Production dashboard -->
+    <!-- 5.13.43 – Production dashboard -->
     <section class="card productionDashboardSection">
       <div class="cardHead split">
         <div><p class="eyebrow">Production</p><h2>Trading dashboard</h2></div>
@@ -188,7 +188,7 @@
       <div id="planningQueue">No planning queue yet. Run Local Workflow.</div>
     </section>
 
-    <!-- 5.13.41 – Hub Listing Drafts + Guarded Publish Executor -->
+    <!-- 5.13.43 – Hub Listing Drafts + Guarded Publish Executor -->
     <section class="card listingDraftsSection">
       <div class="cardHead split"><div><p class="eyebrow">Step 2: Draft → Publish</p><h2>Listing Drafts</h2></div></div>
       <p class="muted">Build drafts from approved items. Test the redacted publish payload first, then optionally publish exactly one approved draft to Backpack.tf (requires <code>allow_guarded_backpack_publish: true</code> in add-on options).</p>
