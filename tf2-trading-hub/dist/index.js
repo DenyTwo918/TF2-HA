@@ -13746,5 +13746,5 @@ __server.listen(PORT, HOST, () => {
     runtimeLogger.error('startup', 'vault_loaded_failed', 'Main account vault startup status failed', runtimeErrorContext(error));
   }
   runtimeLogger.info('startup', 'config_loaded', 'Runtime options loaded', runtimeLoggerOptions());
-  console.log('[tf2-hub] 5.13.44 Main Account No-Wipe Guard + Crash Trace');
+  console.log(`[tf2-hub] ${APP_VERSION} Fast local-only main account save; hard 1500ms timeout; scheduler skips during save`);
 });
