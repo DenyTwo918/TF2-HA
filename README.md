@@ -2,7 +2,7 @@
 
 Home Assistant add-on repository snapshot.
 
-Current TF2 Trading Hub build: 5.13.42 – Price Schema Deep Sync Fix.
+Current TF2 Trading Hub build: 5.13.53 – Repair HA repository visibility and simplified maintainer control.
 
 ## 5.13.42 – Price Schema Deep Sync Fix
 
