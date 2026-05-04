@@ -10,9 +10,9 @@
   <main class="shell">
     <section class="hero hubHero">
       <div>
-        <p class="eyebrow">Home Assistant add-on · 5.13.47 · Operation Single-Flight Lock + Maintainer Queue Fix</p>
+        <p class="eyebrow">Home Assistant add-on · 5.13.48 · True Maintainer Hard Timeout + Cooperative Abort</p>
         <h1>TF2 Trading Hub</h1>
-        <p class="lead">Production dashboard: one heavy trading operation at a time; provider sync is de-duplicated; maintainer/workflow/scheduler no longer overlap.</p><div class="buildBanner"><b>Build 5.13.47 loaded</b><span>Single-flight operation lock active; Maintain now and Run workflow are disabled while another heavy operation is running.</span></div>
+        <p class="lead">Production dashboard: cooperative abort checks, lightweight maintainer start, draining provider-sync state after timeout.</p><div class="buildBanner"><b>Build 5.13.48 loaded</b><span>Cooperative abort active; Maintain now and Run workflow stay disabled while an operation is running or provider sync is draining.</span></div>
         <div class="heroActions diagnosticFirstActions">
           <button id="runDiagnosticBundle" class="primary">Diagnostic bundle for assistant</button>
           <button id="refreshAll">Refresh cockpit</button><button id="toggleSimpleUi">Show advanced UI</button>

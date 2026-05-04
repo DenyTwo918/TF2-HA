@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const APP_VERSION = '5.13.47';
+const APP_VERSION = '5.13.48';
 const APP_NAME = 'TF2 Trading Hub';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -414,9 +414,10 @@ function runtimeLogVaultStatus(action, status = {}, extra = {}) {
 }
 
 
-// ── 5.13.47 – Operation single-flight coordinator ────────────────────────
+// ── 5.13.48 – Operation single-flight coordinator ────────────────────────
 let __activeOperation = null;
 let __providerSyncFlight = null;
+let __drainingOperation = null;
 const OPERATION_DEFAULT_TIMEOUT_MS = 90000;
 const HEAVY_OPERATION_TYPES = new Set(['provider_sync', 'scheduled_pipeline', 'local_workflow', 'classifieds_maintainer', 'publish_wizard_rebuild', 'market_scanner', 'inventory_sync']);
 function nowIso() { return new Date().toISOString(); }
@@ -438,6 +439,14 @@ function operationPublicSnapshot(op = __activeOperation) {
     lastOperationResult: runtimeState.lastOperationResult || null,
     provider_sync_in_flight: Boolean(__providerSyncFlight && __providerSyncFlight.promise),
     provider_sync_operation_id: __providerSyncFlight ? __providerSyncFlight.id : null,
+    provider_sync_owner_operation_id: __providerSyncFlight ? (__providerSyncFlight.ownerOperationId || null) : null,
+    draining: Boolean(__drainingOperation && __drainingOperation.active),
+    drainingProviderSync: Boolean(__drainingOperation && __drainingOperation.active),
+    drainingOperationId: __drainingOperation ? __drainingOperation.id : null,
+    drainingOperationType: __drainingOperation ? __drainingOperation.type : null,
+    drainingOperationAgeMs: __drainingOperation && __drainingOperation.started_ms ? Date.now() - __drainingOperation.started_ms : 0,
+    lastTimedOutOperationId: __drainingOperation ? __drainingOperation.id : (runtimeState.lastOperationResult && runtimeState.lastOperationResult.timed_out ? runtimeState.lastOperationResult.operationId : null),
+    lastTimedOutOperationType: __drainingOperation ? __drainingOperation.type : (runtimeState.lastOperationResult && runtimeState.lastOperationResult.timed_out ? runtimeState.lastOperationResult.type : null),
     queue_policy: 'skip_when_busy'
   };
 }
@@ -450,7 +459,75 @@ function logOperationEvent(eventType, payload = {}, level = 'info') {
   try { audit(eventType, safePayload); } catch {}
   try { appendActionFeed(eventType, safePayload); } catch {}
 }
-function operationBusyPayload(requestedType, reason) {
+
+function operationDrainingBusy() { return Boolean(__drainingOperation && __drainingOperation.active); }
+function operationRuntimeBusy() { return activeOperationBusy() || operationDrainingBusy(); }
+function currentOperationSignalFor(type = null) {
+  if (!__activeOperation || !__activeOperation.abort_controller) return null;
+  if (type && __activeOperation.type !== type) return null;
+  return __activeOperation.abort_controller.signal || null;
+}
+function operationDrainingPayload(requestedType, reason) {
+  const active = operationPublicSnapshot();
+  return {
+    ok: true,
+    version: APP_VERSION,
+    busy: true,
+    skipped: true,
+    draining: true,
+    drainingProviderSync: true,
+    accepted_async: false,
+    already_running: true,
+    message: 'operation recently timed out; provider sync still draining',
+    requested_operation_type: requestedType,
+    reason: reason || null,
+    operation: active,
+    activeOperationId: active.activeOperationId,
+    activeOperationType: active.activeOperationType,
+    activeOperationAgeMs: active.activeOperationAgeMs,
+    drainingOperationId: active.drainingOperationId,
+    drainingOperationType: active.drainingOperationType,
+    drainingOperationAgeMs: active.drainingOperationAgeMs || 0
+  };
+}
+function yieldToEventLoop() { return new Promise(resolve => setImmediate(resolve)); }
+function throwIfOperationAborted(signal = null, stage = 'operation') {
+  const aborted = Boolean((signal && signal.aborted) || (__activeOperation && __activeOperation.timed_out));
+  if (!aborted) return;
+  const reason = signal && signal.reason ? String(signal.reason && signal.reason.message ? signal.reason.message : signal.reason) : 'operation_timeout_90s';
+  try { logOperationEvent('operation_abort_checked', { stage, reason, activeOperationType: __activeOperation ? __activeOperation.type : null }, 'warn'); } catch {}
+  throw new Error(`operation_aborted_${String(stage || 'operation')}: ${reason}`);
+}
+function operationMaybeStartDraining(op, finalResult = {}) {
+  if (!op || !finalResult || !finalResult.timed_out) return;
+  if (!__providerSyncFlight || !__providerSyncFlight.promise) return;
+  const providerOwner = __providerSyncFlight.ownerOperationId || null;
+  if (providerOwner && providerOwner !== op.id) return;
+  __drainingOperation = {
+    active: true,
+    id: op.id,
+    type: op.type,
+    reason: op.reason,
+    started_at: nowIso(),
+    started_ms: Date.now(),
+    timed_out_at: finalResult.completed_at || nowIso(),
+    timeout_elapsed_ms: finalResult.elapsed_ms || 0,
+    providerSyncId: __providerSyncFlight.id,
+    providerSyncStartedAt: __providerSyncFlight.started_at || null,
+    providerSyncOwnerType: __providerSyncFlight.ownerOperationType || op.type
+  };
+  try { logOperationEvent('operation_draining_started', { operationId: op.id, type: op.type, providerSyncId: __providerSyncFlight.id, timeout_elapsed_ms: finalResult.elapsed_ms || 0 }, 'warn'); } catch {}
+  persistOperationState();
+}
+function operationClearDraining(providerSyncId = null) {
+  if (!__drainingOperation || !__drainingOperation.active) return;
+  if (providerSyncId && __drainingOperation.providerSyncId && __drainingOperation.providerSyncId !== providerSyncId) return;
+  const elapsed = __drainingOperation.started_ms ? Date.now() - __drainingOperation.started_ms : 0;
+  try { logOperationEvent('operation_draining_completed', { operationId: __drainingOperation.id, type: __drainingOperation.type, providerSyncId, elapsed_ms: elapsed }, 'info'); } catch {}
+  __drainingOperation = null;
+  persistOperationState();
+}
+ function operationBusyPayload(requestedType, reason) {
   const active = operationPublicSnapshot();
   const payload = {
     ok: true,
@@ -479,6 +556,11 @@ function markOperationStage(stage, extra = {}) {
 }
 function beginOperation(type, reason, options = {}) {
   if (!HEAVY_OPERATION_TYPES.has(type)) type = String(type || 'operation');
+  if (operationDrainingBusy()) {
+    const draining = operationDrainingPayload(type, reason);
+    logOperationEvent('operation_skipped_busy', { requested_type: type, reason, draining: true, drainingOperationType: draining.drainingOperationType, drainingOperationAgeMs: draining.drainingOperationAgeMs });
+    return { started: false, busy: true, response: draining };
+  }
   if (activeOperationBusy()) {
     const busy = operationBusyPayload(type, reason);
     logOperationEvent('operation_skipped_busy', { requested_type: type, reason, activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs });
@@ -506,6 +588,7 @@ function beginOperation(type, reason, options = {}) {
 function clearOperation(op, eventType, result = {}) {
   const elapsed = op && op.started_ms ? Date.now() - op.started_ms : 0;
   const finalResult = { ok: result.ok !== false, version: APP_VERSION, operationId: op && op.id, type: op && op.type, reason: op && op.reason, elapsed_ms: elapsed, completed_at: nowIso(), ...result };
+  if (eventType === 'operation_timeout' || finalResult.timed_out) operationMaybeStartDraining(op, finalResult);
   runtimeState.lastOperationResult = finalResult;
   if (__activeOperation && op && __activeOperation.id === op.id) __activeOperation = null;
   persistOperationState();
@@ -522,8 +605,14 @@ async function runExclusiveOperation(type, reason, fn, options = {}) {
   let timedOut = false;
   const timeoutPromise = new Promise((_, reject) => {
     timer = setTimeout(() => {
+      const actualElapsed = op && op.started_ms ? Date.now() - op.started_ms : timeoutMs;
       timedOut = true;
-      try { op.abort_controller && op.abort_controller.abort(); } catch {}
+      op.timed_out = true;
+      op.timed_out_at = nowIso();
+      if (actualElapsed > timeoutMs + 2000) {
+        try { logOperationEvent('operation_timeout_delayed', { operationId: op.id, type, expectedTimeoutMs: timeoutMs, actualElapsedMs: actualElapsed, delayMs: actualElapsed - timeoutMs }, 'warn'); } catch {}
+      }
+      try { op.abort_controller && op.abort_controller.abort(new Error(`${type}_timeout_${Math.round(timeoutMs / 1000)}s`)); } catch { try { op.abort_controller && op.abort_controller.abort(); } catch {} }
       reject(new Error(`${type}_timeout_${Math.round(timeoutMs / 1000)}s`));
     }, timeoutMs);
     try { timer.unref && timer.unref(); } catch {}
@@ -552,11 +641,12 @@ async function runExclusiveOperation(type, reason, fn, options = {}) {
 }
 function schedulerBusySkip(job) {
   const active = operationPublicSnapshot();
-  const payload = { job, activeOperationType: active.activeOperationType, activeOperationId: active.activeOperationId, activeOperationAgeMs: active.activeOperationAgeMs };
-  runtimeLogger.info('scheduler', 'scheduler_job_skipped_busy', 'Scheduler job skipped: operation already running', payload);
-  try { audit('scheduler_job_skipped_busy', payload); } catch {}
-  try { appendActionFeed('scheduler_job_skipped_busy', payload); } catch {}
-  return { ok: true, skipped: true, busy: true, message: 'operation already running', operation: active };
+  const payload = { job, activeOperationType: active.activeOperationType, activeOperationId: active.activeOperationId, activeOperationAgeMs: active.activeOperationAgeMs, drainingProviderSync: active.drainingProviderSync || false, drainingOperationType: active.drainingOperationType || null, drainingOperationAgeMs: active.drainingOperationAgeMs || 0 };
+  const eventName = active.drainingProviderSync ? 'scheduler_job_skipped_draining' : 'scheduler_job_skipped_busy';
+  runtimeLogger.info('scheduler', eventName, active.drainingProviderSync ? 'Scheduler job skipped: provider sync draining after timeout' : 'Scheduler job skipped: operation already running', payload);
+  try { audit(eventName, payload); } catch {}
+  try { appendActionFeed(eventName, payload); } catch {}
+  return { ok: true, skipped: true, busy: true, draining: Boolean(active.drainingProviderSync), message: active.drainingProviderSync ? 'operation recently timed out; provider sync still draining' : 'operation already running', operation: active };
 }
 
 
@@ -1755,7 +1845,7 @@ function getOptions() {
     backpack_tf_enabled: bool(options.backpack_tf_enabled, true),
     backpack_tf_access_token: String(credentialAccount.backpack_tf_access_token || options.backpack_tf_access_token || '').trim(),
     backpack_tf_api_key: String(credentialAccount.backpack_tf_api_key || options.backpack_tf_api_key || '').trim(),
-    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.47').trim(),
+    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.48').trim(),
     backpack_tf_base_url: String(options.backpack_tf_base_url || 'https://backpack.tf').replace(/\/$/, ''),
     backpack_tf_cache_ttl_minutes: clamp(options.backpack_tf_cache_ttl_minutes, 30, 1, 1440),
     backpack_tf_retry_count: clamp(options.backpack_tf_retry_count, 2, 0, 5),
@@ -3428,7 +3518,7 @@ class BackpackTfV2ListingManager {
     return configured.endsWith('/api') ? configured : `${configured}/api`;
   }
   headers(authMode = 'token') {
-    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.47' };
+    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.48' };
     if (authMode === 'token' && this.options.backpack_tf_access_token) headers['X-Auth-Token'] = this.options.backpack_tf_access_token;
     if (authMode === 'bearer' && this.options.backpack_tf_access_token) headers.authorization = `Bearer ${this.options.backpack_tf_access_token}`;
     if (authMode === 'api_key_header' && this.options.backpack_tf_api_key) headers['x-api-key'] = this.options.backpack_tf_api_key;
@@ -3703,8 +3793,21 @@ class BackpackTfV2ListingManager {
       return __providerSyncFlight.promise;
     }
     const providerOperationId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(8).toString('hex');
-    const promise = this.__syncListingsSingleFlight(force).finally(() => { if (__providerSyncFlight && __providerSyncFlight.id === providerOperationId) __providerSyncFlight = null; });
-    __providerSyncFlight = { id: providerOperationId, force: Boolean(force), started_at: new Date().toISOString(), promise };
+    const ownerSnapshot = operationPublicSnapshot();
+    const providerOwnerOperationId = ownerSnapshot.activeOperationId || null;
+    const providerOwnerOperationType = ownerSnapshot.activeOperationType || null;
+    const promise = this.__syncListingsSingleFlight(force).then(result => {
+      if (__drainingOperation && __drainingOperation.providerSyncId === providerOperationId) {
+        try { logOperationEvent('provider_sync_completed_after_operation_timeout', { providerOperationId, ownerOperationId: providerOwnerOperationId, ownerOperationType: providerOwnerOperationType, ok: Boolean(result && result.ok), listings: Number(result && result.listings_count || 0), prices: Number(result && result.prices_count || 0) }, 'warn'); } catch {}
+      }
+      return result;
+    }).finally(() => {
+      if (__providerSyncFlight && __providerSyncFlight.id === providerOperationId) {
+        operationClearDraining(providerOperationId);
+        __providerSyncFlight = null;
+      }
+    });
+    __providerSyncFlight = { id: providerOperationId, force: Boolean(force), ownerOperationId: providerOwnerOperationId, ownerOperationType: providerOwnerOperationType, started_at: new Date().toISOString(), promise };
     return promise;
   }
   async __syncListingsSingleFlight(force = false) {
@@ -8087,7 +8190,7 @@ class SteamInventorySyncService {
       let accepted = null;
       let lastFailure = null;
       for (const variant of this.inventoryUrls(options.steam_id64, startAssetId)) {
-        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.47' } });
+        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.48' } });
         const body = result.body || {};
         const parsed = result.ok ? this.extractInventoryPayload(body) : { ok: false, error: result.error || body.error || body.raw || `HTTP ${result.status}` };
         attempts.push({
@@ -10311,7 +10414,7 @@ class HubAutopilotPipelineService {
     return !last || (Date.now() - last >= options.review_interval_minutes * 60 * 1000);
   }
   async run(reason = 'scheduled_pipeline') {
-    if ((reason === 'scheduled_pipeline' || reason === 'manual_pipeline') && activeOperationBusy() && !(__activeOperation && __activeOperation.type === 'scheduled_pipeline')) {
+    if ((reason === 'scheduled_pipeline' || reason === 'manual_pipeline') && operationRuntimeBusy() && !(__activeOperation && __activeOperation.type === 'scheduled_pipeline')) {
       const busy = operationBusyPayload('scheduled_pipeline', reason);
       runtimeLogger.info('scheduler', 'scheduler_job_skipped_busy', 'Scheduled pipeline skipped: operation already running', { activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs });
       try { audit('scheduler_job_skipped_busy', { job: 'scheduled_pipeline', activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs }); } catch {}
@@ -11779,6 +11882,8 @@ class PersistentClassifiedsMaintainerService {
   }
   async run(reason = 'scheduled_classifieds_maintainer', context = {}) {
     if (this.running) return { ok: false, skipped: true, stage: 'already_running', version: APP_VERSION };
+    await yieldToEventLoop();
+    throwIfOperationAborted(context && context.signal, 'maintainer_start');
     this.running = true;
     const options = getOptions();
     const started = new Date().toISOString();
@@ -11806,14 +11911,18 @@ class PersistentClassifiedsMaintainerService {
       writeJson(CLASSIFIEDS_MAINTAINER_PATH, { ok: Boolean(final.ok), version: APP_VERSION, running: false, last_run_at: final.completed_at || new Date().toISOString(), last_result: final, runs });
       return final;
     };
-    writeJson(CLASSIFIEDS_MAINTAINER_PATH, { ...this.status(), running: true, last_started_at: started });
+    writeJson(CLASSIFIEDS_MAINTAINER_PATH, { ok: true, version: APP_VERSION, running: true, last_started_at: started, reason, lightweight_start: true, active_operation: operationPublicSnapshot() });
+    await yieldToEventLoop();
+    throwIfOperationAborted(context && context.signal, 'maintainer_before_slider_check');
     try {
       if (!result.enabled) {
         result.ok = false; result.skipped.push('slider_or_safety_gate_disabled'); result.completed_at = new Date().toISOString();
         return saveRun(result);
       }
       const listingManager = new BackpackTfV2ListingManager(options, this.audit);
+      throwIfOperationAborted(context && context.signal, 'maintainer_before_provider_sync');
       const sync = await listingManager.syncListings(true);
+      throwIfOperationAborted(context && context.signal, 'maintainer_after_provider_sync');
       result.steps.push({ stage: 'sync_account_listings', ok: Boolean(sync.ok), listings: Number(sync.listings_count || 0), error: sync.error || null });
 
       // 5.13.29: stale sell listings (sell listing exists but owned asset is gone)
@@ -11832,13 +11941,13 @@ class PersistentClassifiedsMaintainerService {
         result.counters.pruned_unactionable = Number(result.counters.pruned_unactionable || 0) + prunedBeforeFill.pruned;
       }
 
-      const autoSell = await new BoughtItemAutoSellRelisterService(this.audit).run('persistent_classifieds_maintainer', { publish: true, sync_inventory: true });
+      await yieldToEventLoop(); throwIfOperationAborted(context && context.signal, 'maintainer_before_auto_sell_relister'); const autoSell = await new BoughtItemAutoSellRelisterService(this.audit).run('persistent_classifieds_maintainer', { publish: true, sync_inventory: true }); throwIfOperationAborted(context && context.signal, 'maintainer_after_auto_sell_relister');
       result.steps.push({ stage: 'auto_sell_relister', ok: Boolean(autoSell.ok), detected: Number(autoSell.counters?.detected || 0), created_sell_drafts: Number(autoSell.counters?.created_sell_drafts || 0), published_sell_listings: Number(autoSell.counters?.published_sell_listings || 0), errors: Number(autoSell.counters?.errors || 0) });
       if (autoSell.counters && Number(autoSell.counters.published_sell_listings || 0) > 0) {
         result.counters.published += Number(autoSell.counters.published_sell_listings || 0);
         result.published.push(...(autoSell.published || []).map(x => ({ ...x, source: 'auto_sell_relister' })));
       }
-      const manualOwnedSell = await new ManualOwnedItemSellDetectorService(this.audit).run('persistent_classifieds_maintainer', { publish: true, sync_inventory: false });
+      await yieldToEventLoop(); throwIfOperationAborted(context && context.signal, 'maintainer_before_manual_owned_sell_detector'); const manualOwnedSell = await new ManualOwnedItemSellDetectorService(this.audit).run('persistent_classifieds_maintainer', { publish: true, sync_inventory: false }); throwIfOperationAborted(context && context.signal, 'maintainer_after_manual_owned_sell_detector');
       result.steps.push({ stage: 'manual_owned_sell_detector', ok: Boolean(manualOwnedSell.ok), candidates: Number(manualOwnedSell.counters?.candidates || 0), created_sell_drafts: Number(manualOwnedSell.counters?.created_sell_drafts || 0), published_sell_listings: Number(manualOwnedSell.counters?.published_sell_listings || 0), errors: Number(manualOwnedSell.counters?.errors || 0) });
       if (manualOwnedSell.counters && Number(manualOwnedSell.counters.published_sell_listings || 0) > 0) {
         result.counters.published += Number(manualOwnedSell.counters.published_sell_listings || 0);
@@ -11859,7 +11968,7 @@ class PersistentClassifiedsMaintainerService {
       // one existing approved draft, so a verified listing caused every later
       // cycle to no-op.  Here we always try to have at least `maxPublishes`
       // publishable drafts before the loop starts.
-      const ensureTopMaintainerDrafts = () => {
+      const ensureTopMaintainerDrafts = async () => { await yieldToEventLoop(); throwIfOperationAborted(context && context.signal, 'maintainer_refill_start');
         const queue = new PlanningQueueService(this.audit);
         let q = queue.current();
         const queueItemsBefore = Array.isArray(q.items) ? q.items.length : 0;
@@ -12949,7 +13058,7 @@ async function handleApi(req, res, pathname) {
   if (pathname === '/api/status') {
     const options = getOptions();
     const state = readJson(STATE_PATH, {});
-    // 5.13.46: Fast cached status — no heavy rebuilds, no maintainer.status() call.
+    // 5.13.48: Fast cached status — no heavy rebuilds, no maintainer.status() call.
     // Read the last persisted maintainer state directly from disk (one JSON read, cheap).
     const maintainerFile = readJson(CLASSIFIEDS_MAINTAINER_PATH, { ok: true, enabled: false, running: false });
     const maintainerCached = {
@@ -12969,7 +13078,7 @@ async function handleApi(req, res, pathname) {
       ok: true,
       app: APP_NAME,
       version: APP_VERSION,
-      scope: '5.13.47 – Operation Single-Flight Lock + Maintainer Queue Fix',
+      scope: '5.13.48 – Operation Single-Flight Lock + Maintainer Queue Fix',
       mode: 'operations_cockpit_notifications_persistence_listing_engine_targeted_orders_multi_account_strategy_ollama',
       steam_web_api_key_saved: Boolean(options.steam_web_api_key),
       steam_web_api_key: redacted(options.steam_web_api_key),
@@ -13781,7 +13890,7 @@ async function handleApi(req, res, pathname) {
   }
   if (pathname === '/api/publish-wizard/prepare-key-to-metal' && (req.method === 'POST' || req.method === 'GET')) return json(res, 200, prepareKeyToMetalDraft(getOptions(), auditService));
   if (pathname === '/api/most-traded/status' || pathname === '/api/offer-booster/status' || pathname === '/api/auto-list-anything/status') return json(res, 200, buildMostTradedAndKeysStatus(getOptions()));
-  // 5.13.46: lite endpoint is always fast; full /status returns cached-only snapshot.
+  // 5.13.48: lite endpoint is always fast; full /status returns cached-only snapshot.
   // Heavy rebuild must be explicitly requested via POST /api/publish-wizard/rebuild.
   if (pathname === '/api/publish-wizard/status/lite') { try { return json(res, 200, buildPublishWizardLiteStatus()); } catch (error) { return json(res, 200, { ok: true, lite: true, version: APP_VERSION, updated_at: new Date().toISOString(), safe_fallback: true, error: safeError(error) }); } }
   if (pathname === '/api/publish-wizard/status') {
@@ -13794,7 +13903,7 @@ async function handleApi(req, res, pathname) {
     return json(res, 200, { ok: true, version: APP_VERSION, updated_at: new Date().toISOString(), cached: false, maintainer_running: __maintainerRunning, operation: operationPublicSnapshot(), active_operation: operationPublicSnapshot(), steps: [], guarded_publish_enabled: Boolean(options.allow_guarded_backpack_publish), live_classifieds_writes_enabled: Boolean(options.allow_live_classifieds_writes), backpack_tf_write_mode: options.backpack_tf_write_mode, publish_disabled_reason: 'Dashboard status not built yet. Click Rebuild to load.', classifieds_maintainer: { ok: true, running: __maintainerRunning, enabled: classifiedsMaintainer.enabled(options), note: 'pre_build_lite' }, auto_sell_relister: { ok: true, note: 'pre_build_lite' }, trade_offer_state_machine: { ok: true, counts: {}, states: [], next_action: 'Status will be available after first rebuild.' } });
   }
   if (pathname === '/api/publish-wizard/rebuild' && (req.method === 'POST' || req.method === 'GET')) {
-    // 5.13.47: Heavy rebuild is single-flight and never overlaps provider/maintainer.
+    // 5.13.48: Heavy rebuild is single-flight and never overlaps provider/maintainer.
     const result = await runExclusiveOperation('publish_wizard_rebuild', 'manual_publish_wizard_rebuild', async () => getCachedPublishWizardStatus(), { timeoutMs: 30000 });
     if (result.busy) return json(res, 202, result);
     if (result.ok && result.result) return json(res, 200, { ...result.result, rebuilt: true, operation: operationPublicSnapshot(), active_operation: operationPublicSnapshot() });
@@ -13867,7 +13976,7 @@ async function handleApi(req, res, pathname) {
     // still in progress.  Start manual runs in the background and return an
     // immediate accepted status.  The live dashboard poll then reads the run
     // result from /api/classifieds-maintainer/status.
-    if (__maintainerRunning || activeOperationBusy()) {
+    if (__maintainerRunning || operationRuntimeBusy()) {
       const busy = operationBusyPayload('classifieds_maintainer', 'manual_ui_async');
       runtimeLogger.info('maintainer', 'maintainer_skipped_busy', 'Maintainer skipped: operation already running', { activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs });
       try { audit('maintainer_skipped_busy', { activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs }); } catch {}
@@ -13929,11 +14038,18 @@ async function runMaintainerIsolated(reason = 'scheduled_classifieds_maintainer'
   audit('maintainer_started', { reason });
   appendActionFeed('maintainer_started', { reason, started_at: runtimeState.maintainerLastStartedAt });
   const MAINTAINER_TIMEOUT_MS = 90000;
-  const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('maintainer_timeout_90s')), MAINTAINER_TIMEOUT_MS));
+  let __maintainerTimeoutTimer = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    __maintainerTimeoutTimer = setTimeout(() => {
+      try { context && context.signal && context.signal.aborted === false && typeof AbortController !== 'undefined' && __activeOperation && __activeOperation.abort_controller && __activeOperation.abort_controller.abort(new Error('maintainer_timeout_90s')); } catch {}
+      reject(new Error('maintainer_timeout_90s'));
+    }, MAINTAINER_TIMEOUT_MS);
+    try { __maintainerTimeoutTimer.unref && __maintainerTimeoutTimer.unref(); } catch {}
+  });
   let result;
   try {
     result = await Promise.race([
-      classifiedsMaintainer.run(reason, context),
+      classifiedsMaintainer.run(reason, { ...context, signal: context && context.signal ? context.signal : currentOperationSignalFor('classifieds_maintainer') }),
       timeoutPromise
     ]);
     runtimeState.maintainerLastCompletedAt = new Date().toISOString();
@@ -13959,6 +14075,7 @@ async function runMaintainerIsolated(reason = 'scheduled_classifieds_maintainer'
     } catch {}
     result = { ok: false, error: errSafe, timed_out: isTimeout };
   } finally {
+    try { if (__maintainerTimeoutTimer) clearTimeout(__maintainerTimeoutTimer); } catch {}
     __maintainerRunning = false;
   }
   return result;
@@ -13979,14 +14096,14 @@ function startScheduler() {
     Promise.resolve().then(async () => {
       try {
         if (hubAutopilot.due()) {
-          if (activeOperationBusy()) { schedulerBusySkip('scheduled_pipeline'); }
+          if (operationRuntimeBusy()) { schedulerBusySkip('scheduled_pipeline'); }
           else {
             runtimeLogger.info('scheduler', 'scheduler_job_running', 'Scheduler running job', { job: 'scheduled_pipeline' });
             await runExclusiveOperation('scheduled_pipeline', 'scheduled_pipeline', async () => hubAutopilot.run('scheduled_pipeline'), { timeoutMs: 90000 }).catch(error => { runtimeLogger.error('scheduler', 'scheduler_job_failed', 'Scheduler job failed', { job: 'scheduled_pipeline', error: safeError(error) }); audit('scheduled_pipeline_failed', { message: safeError(error) }); });
           }
         }
         if (classifiedsMaintainer.due()) {
-          if (activeOperationBusy()) { const skipped = schedulerBusySkip('scheduled_classifieds_maintainer'); try { audit('maintainer_skipped_busy', { activeOperationType: skipped.operation.activeOperationType, activeOperationAgeMs: skipped.operation.activeOperationAgeMs }); } catch {} }
+          if (operationRuntimeBusy()) { const skipped = schedulerBusySkip('scheduled_classifieds_maintainer'); try { audit('maintainer_skipped_busy', { activeOperationType: skipped.operation.activeOperationType, activeOperationAgeMs: skipped.operation.activeOperationAgeMs }); } catch {} }
           else {
             runtimeLogger.info('scheduler', 'scheduler_job_running', 'Scheduler running job', { job: 'scheduled_classifieds_maintainer' });
             await runExclusiveOperation('classifieds_maintainer', 'scheduled_classifieds_maintainer', async (signal, op) => runMaintainerIsolated('scheduled_classifieds_maintainer', { signal, operationId: op.id }), { timeoutMs: 90000 });
@@ -14028,5 +14145,5 @@ __server.listen(PORT, HOST, () => {
     runtimeLogger.error('startup', 'vault_loaded_failed', 'Main account vault startup status failed', runtimeErrorContext(error));
   }
   runtimeLogger.info('startup', 'config_loaded', 'Runtime options loaded', runtimeLoggerOptions());
-  console.log(`[tf2-hub] ${APP_VERSION} Maintainer crash isolation + fast status API`);
+  console.log(`[tf2-hub] ${APP_VERSION} True maintainer hard timeout + cooperative abort`);
 });
