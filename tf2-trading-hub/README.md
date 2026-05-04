@@ -185,3 +185,11 @@ Inspired by lightweight pollers like TF2Autobot and Gladiator.tf, the dashboard 
 ## 5.13.43 – Main Account Restart Persistence Guard
 
 Re-publishes 5.13.43 with clean Home Assistant metadata files (`repository.yaml`, `config.yaml`, `build.yaml`, `run.sh`) and a fresh version bump so Supervisor can detect the update after repository cache issues.
+## 5.13.55 – Backpack Price Schema Memory Cache
+
+- Adds in-memory Backpack.tf price schema cache so 45k+ price rows are not parsed repeatedly during maintainer runs.
+- Uses compact price schema writes to reduce synchronous JSON serialization overhead.
+- Maintain now uses cached provider sync instead of forcing a fresh heavy Backpack.tf price-schema refresh.
+- Keeps credential vault logic unchanged.
+- Keeps guarded/manual trading safety defaults unchanged.
+

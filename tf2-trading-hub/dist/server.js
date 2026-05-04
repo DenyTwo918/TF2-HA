@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const APP_VERSION = '5.13.54';
+const APP_VERSION = '5.13.55';
 const APP_NAME = 'TF2 Trading Hub';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -22,6 +22,9 @@ const PROVIDER_STATE_PATH = path.join(DATA_DIR, 'steam-companion-provider-state.
 const BACKPACK_LISTINGS_PATH = path.join(DATA_DIR, 'steam-companion-backpack-listings.json');
 const BACKPACK_PRICE_SCHEMA_PATH = path.join(DATA_DIR, 'tf2-hub-backpack-price-schema.json');
 const BACKPACK_PRICE_SCHEMA_DEBUG_PATH = path.join(DATA_DIR, 'tf2-hub-backpack-price-schema-debug.json');
+// 5.13.55: in-memory price schema cache – parse once, serve from memory, avoid repeated blocking JSON.parse of 45k+ entries
+let __priceSchemaCache = null;
+let __priceSchemaCacheTTL = 0;
 const STEAM_ITEM_SCHEMA_PATH = path.join(DATA_DIR, 'tf2-hub-steam-item-schema.json');
 const MARKET_SCANNER_PATH = path.join(DATA_DIR, 'tf2-hub-market-scanner.json');
 const LISTING_PLAN_PATH = path.join(DATA_DIR, 'steam-companion-listing-plan.json');
@@ -295,6 +298,29 @@ function writeJsonIfChanged(filePath, value) {
   __writeJsonHashCache.set(filePath, hash);
   __notifyWatchers(filePath);
   return true;
+}
+// 5.13.55: price schema memory cache helpers – prevents repeated blocking JSON.parse of 45k+ entries
+function readPriceSchemaJson(defaultVal = { ok: false, prices: [] }) {
+  if (__priceSchemaCache && Date.now() < __priceSchemaCacheTTL) return __priceSchemaCache;
+  const data = readJson(BACKPACK_PRICE_SCHEMA_PATH, defaultVal);
+  if (data && Array.isArray(data.prices) && data.prices.length > 0) {
+    __priceSchemaCache = data;
+    __priceSchemaCacheTTL = Date.now() + 30 * 60 * 1000;
+  }
+  return data;
+}
+function writePriceSchemaJson(value) {
+  ensureDataDir();
+  const tmp = `${BACKPACK_PRICE_SCHEMA_PATH}.tmp`;
+  // Compact JSON (no pretty-printing) – 2-3x faster serialization for 45k+ entries
+  fs.writeFileSync(tmp, JSON.stringify(value));
+  fs.renameSync(tmp, BACKPACK_PRICE_SCHEMA_PATH);
+  __notifyWatchers(BACKPACK_PRICE_SCHEMA_PATH);
+  // Populate in-memory cache immediately so next reads don't hit disk at all
+  if (value && Array.isArray(value.prices) && value.prices.length > 0) {
+    __priceSchemaCache = value;
+    __priceSchemaCacheTTL = Date.now() + 30 * 60 * 1000;
+  }
 }
 function readJsonLines(filePath, limit = 300) {
   try {
@@ -1215,7 +1241,7 @@ function providerHealthState() {
   const apiKeyMissing = /api[_\s-]?key[_\s-]?missing|api key missing|hasapikey:false|has_api_key:false/.test(providerText);
 
   const listingsRaw = readJson(BACKPACK_LISTINGS_PATH, {});
-  const priceSchemaRaw = readJson(BACKPACK_PRICE_SCHEMA_PATH, {});
+  const priceSchemaRaw = readPriceSchemaJson({});
   const pricelistRaw = readJson(PRICELIST_PATH, {});
   const inventoryRaw = readJson(HUB_INVENTORY_PATH, {});
   const scannerRaw = readJson(MARKET_SCANNER_PATH, {});
@@ -1935,7 +1961,7 @@ function getOptions() {
     backpack_tf_enabled: bool(options.backpack_tf_enabled, true),
     backpack_tf_access_token: String(credentialAccount.backpack_tf_access_token || options.backpack_tf_access_token || '').trim(),
     backpack_tf_api_key: String(credentialAccount.backpack_tf_api_key || options.backpack_tf_api_key || '').trim(),
-    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.54').trim(),
+    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.55').trim(),
     backpack_tf_base_url: String(options.backpack_tf_base_url || 'https://backpack.tf').replace(/\/$/, ''),
     backpack_tf_cache_ttl_minutes: clamp(options.backpack_tf_cache_ttl_minutes, 30, 1, 1440),
     backpack_tf_retry_count: clamp(options.backpack_tf_retry_count, 2, 0, 5),
@@ -3608,7 +3634,7 @@ class BackpackTfV2ListingManager {
     return configured.endsWith('/api') ? configured : `${configured}/api`;
   }
   headers(authMode = 'token') {
-    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.54' };
+    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.55' };
     if (authMode === 'token' && this.options.backpack_tf_access_token) headers['X-Auth-Token'] = this.options.backpack_tf_access_token;
     if (authMode === 'bearer' && this.options.backpack_tf_access_token) headers.authorization = `Bearer ${this.options.backpack_tf_access_token}`;
     if (authMode === 'api_key_header' && this.options.backpack_tf_api_key) headers['x-api-key'] = this.options.backpack_tf_api_key;
@@ -3632,7 +3658,7 @@ class BackpackTfV2ListingManager {
     // 5.13.42: a fresh listings cache must not block a price-schema retry.
     // If an API key is saved and we still have no Backpack price schema, force a real provider sync.
     if (this.options.backpack_tf_api_key) {
-      const schema = readJson(BACKPACK_PRICE_SCHEMA_PATH, { ok: false, prices: [], prices_count: 0 });
+      const schema = readPriceSchemaJson({ ok: false, prices: [], prices_count: 0 });
       const schemaCount = Math.max(Number(schema.prices_count || 0), Array.isArray(schema.prices) ? schema.prices.length : 0, Number(cache.prices_count || 0));
       if (schemaCount <= 0) return false;
     }
@@ -3858,7 +3884,7 @@ class BackpackTfV2ListingManager {
       }
       if (result.ok && prices.length > 0) {
         const payload = { ok: true, updated_at: new Date().toISOString(), source: 'backpack_tf_IGetPrices_v4', auth: 'api_key_query_param', raw_mode: variant.rawMode, prices_count: prices.length, prices };
-        writeJson(BACKPACK_PRICE_SCHEMA_PATH, payload);
+        writePriceSchemaJson(payload);
         writeJson(BACKPACK_PRICE_SCHEMA_DEBUG_PATH, { ok: true, updated_at: payload.updated_at, source_url: this.redactBackpackSecretUrl(variant.url), selected_attempt: attempt, attempts: attempts.slice(-5) });
         runtimeLogger.info('backpack_tf', 'pricelist_loaded', 'Backpack.tf price schema loaded', { pricesCount: prices.length, authMode: variant.label, durationMs: Date.now() - startedAt });
         appendActionFeed('backpack_tf_price_schema_loaded', { prices: prices.length, auth_mode: variant.label, raw: variant.rawMode });
@@ -4086,7 +4112,7 @@ function syncListingTextPreview(preview = {}, itemName = 'item', intent = 'buy',
 class MarketTargetScannerService {
   constructor(auditService) { this.audit = auditService; }
   loadPriceSchema() {
-    const saved = readJson(BACKPACK_PRICE_SCHEMA_PATH, null);
+    const saved = readPriceSchemaJson(null);
     if (saved && Array.isArray(saved.prices)) return saved;
     const cache = readJson(BACKPACK_LISTINGS_PATH, { ok: false });
     if (Array.isArray(cache.prices_sample) && cache.prices_sample.length) return { ok: true, updated_at: cache.updated_at || null, source: 'backpack_cache_sample', prices_count: cache.prices_sample.length, prices: cache.prices_sample };
@@ -5061,7 +5087,7 @@ class HubListingDraftService {
     let match = steamItems.find(x => this.normalizeSchemaName(x.item_name || x.name) === targetName);
     if (match && Number(match.defindex) > 0) return { ok: true, defindex: Number(match.defindex), source: 'steam_item_schema_cache', matched_name: match.item_name || match.name };
 
-    const priceSchema = readJson(BACKPACK_PRICE_SCHEMA_PATH, { ok: false, prices: [] });
+    const priceSchema = readPriceSchemaJson({ ok: false, prices: [] });
     const prices = Array.isArray(priceSchema.prices) ? priceSchema.prices : [];
     match = prices.find(x => this.normalizeSchemaName(x.item_name) === targetName && String(x.quality ?? '6') === targetQuality && String(x.priceindex ?? '0') === targetPriceindex && Number(x.defindex) > 0)
       || prices.find(x => this.normalizeSchemaName(x.item_name) === targetName && Number(x.defindex) > 0);
@@ -5730,7 +5756,7 @@ function keyPriceEstimateRef() {
   const inv = readJson(HUB_INVENTORY_PATH, { ok: false, analysis: {} });
   const fromInv = Number(inv.analysis?.key_ref_estimate || 0);
   if (Number.isFinite(fromInv) && fromInv > 0) return fromInv;
-  const schema = readJson(BACKPACK_PRICE_SCHEMA_PATH, { ok: false, prices: [] });
+  const schema = readPriceSchemaJson({ ok: false, prices: [] });
   const prices = Array.isArray(schema.prices) ? schema.prices : [];
   try { return new MarketTargetScannerService(null).keyPriceRef(prices, getOptions()); } catch { return 54.33; }
 }
@@ -8207,7 +8233,7 @@ class SteamInventorySyncService {
     return { key_ref_estimate: keyRef, map, lookup_keys: map.size, prices_seen: prices.length };
   }
   analyzeItems(items) {
-    const schema = readJson(BACKPACK_PRICE_SCHEMA_PATH, { ok: false, prices: [] });
+    const schema = readPriceSchemaJson({ ok: false, prices: [] });
     const prices = Array.isArray(schema.prices) ? schema.prices : [];
     const lookup = this.priceLookup(prices);
     let priced = 0, totalRef = 0, tradable = 0;
@@ -8281,7 +8307,7 @@ class SteamInventorySyncService {
       let accepted = null;
       let lastFailure = null;
       for (const variant of this.inventoryUrls(options.steam_id64, startAssetId)) {
-        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.54' } });
+        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.55' } });
         const body = result.body || {};
         const parsed = result.ok ? this.extractInventoryPayload(body) : { ok: false, error: result.error || body.error || body.raw || `HTTP ${result.status}` };
         attempts.push({
@@ -8387,7 +8413,7 @@ class TradingBrainService {
     const accountList = Array.isArray(accounts.accounts) ? accounts.accounts : [];
     const enabledAccounts = accountList.filter(account => account.enabled !== false && account.role !== 'disabled');
     const backpackCache = readJson(BACKPACK_LISTINGS_PATH, { ok: false, listings_count: 0, prices_count: 0 });
-    const priceSchema = readJson(BACKPACK_PRICE_SCHEMA_PATH, { ok: false, prices: [] });
+    const priceSchema = readPriceSchemaJson({ ok: false, prices: [] });
     const inventoryRaw = readJson(HUB_INVENTORY_PATH, { ok: false, stage: 'not_synced', error: 'Inventory not synced yet.' });
     const inventory = compactInventorySummary(inventoryRaw);
     const scanner = readJson(MARKET_SCANNER_PATH, { ok: false, candidates: [] });
@@ -10032,7 +10058,7 @@ class PublishReadinessGateService {
     const payloadApproval = readJson(LISTING_PAYLOAD_LOCAL_APPROVAL_PATH, { ok: false, status: 'not_applied' });
     const preview = readJson(LISTING_PAYLOAD_PREVIEW_PATH, { ok: false, payloads: [] });
     const backpackCache = readJson(BACKPACK_LISTINGS_PATH, { ok: false });
-    const priceSchema = readJson(BACKPACK_PRICE_SCHEMA_PATH, { ok: false, prices: [] });
+    const priceSchema = readPriceSchemaJson({ ok: false, prices: [] });
     const inventory = readJson(HUB_INVENTORY_PATH, { ok: false, analysis: {} });
     const requests = Array.isArray(dryRun.requests) ? dryRun.requests : [];
     const firstRequest = requests[0] || null;
@@ -10970,7 +10996,7 @@ function inventoryExactSchemaValueForOwnedItem(item = {}) {
   if (!name) return 0;
   const quality = inventoryQualityId(item);
   try {
-    const schema = readJson(BACKPACK_PRICE_SCHEMA_PATH, { ok: false, prices: [] });
+    const schema = readPriceSchemaJson({ ok: false, prices: [] });
     const prices = Array.isArray(schema.prices) ? schema.prices : [];
     if (!prices.length) return 0;
     const scanner = new MarketTargetScannerService(null);
@@ -11000,7 +11026,7 @@ function inventoryAnalysisValueForOwnedItem(item = {}) {
   // This prevents auto-sell from reusing stale buy-plan target prices when the
   // raw inventory item itself does not carry value_ref fields.
   try {
-    const prices = readJson(BACKPACK_PRICE_SCHEMA_PATH, { ok: false, prices: [] });
+    const prices = readPriceSchemaJson({ ok: false, prices: [] });
     const lookup = new SteamInventorySyncService(null).priceLookup(Array.isArray(prices.prices) ? prices.prices : []);
     for (const key of inventoryPriceKeys(item)) {
       const entry = lookup.map.get(key);
@@ -12013,11 +12039,13 @@ class PersistentClassifiedsMaintainerService {
       }
       const listingManager = new BackpackTfV2ListingManager(options, this.audit);
       throwIfOperationAborted(context && context.signal, 'maintainer_before_provider_sync');
-      const sync = await withStageTimeout('maintainer_provider_sync', 20000, () => listingManager.syncListings(true));
+      // 5.13.55: Maintain now must be lightweight. Do not force a fresh Backpack.tf price-schema download/parse.
+      // A forced provider sync parses ~45k price rows and can trigger HA Supervisor SIGKILL on smaller hosts.
+      const sync = await withStageTimeout('maintainer_provider_sync_cached', 12000, () => listingManager.syncListings(false));
       throwIfOperationAborted(context && context.signal, 'maintainer_after_provider_sync');
-      result.steps.push({ stage: 'sync_account_listings', ok: Boolean(sync.ok), listings: Number(sync.listings_count || 0), error: sync.error || null });
+      result.steps.push({ stage: 'sync_account_listings_cached', ok: Boolean(sync.ok), cached: Boolean(sync.cached), listings: Number(sync.listings_count || 0), error: sync.error || null });
 
-      // 5.13.54: yield before heavy post-sync work to prevent SIGKILL from HA supervisor
+      // 5.13.55: yield before heavy post-sync work to prevent SIGKILL from HA supervisor
       await yieldToEventLoop(); throwIfOperationAborted(context && context.signal, 'maintainer_before_stale_guard');
       // 5.13.29: stale sell listings (sell listing exists but owned asset is gone)
       // should not keep the account dirty forever.  Archive only when guarded
@@ -12375,7 +12403,7 @@ class HubSetupService {
     const options = getOptions();
     const accounts = new MultiAccountPortfolioService(this.audit).list();
     const backpackCache = readJson(BACKPACK_LISTINGS_PATH, { ok: false });
-    const priceSchema = readJson(BACKPACK_PRICE_SCHEMA_PATH, { ok: false, prices: [] });
+    const priceSchema = readPriceSchemaJson({ ok: false, prices: [] });
     const decisions = readJson(DECISIONS_PATH, { ok: false, decisions: [] });
     const pricing = readJson(PRICING_REPORT_PATH, { ok: false });
     const inventory = readJson(HUB_INVENTORY_PATH, { ok: false });
@@ -12668,7 +12696,7 @@ class DiagnosticBundleService {
   }
   bundleBackpack() {
     const cache = readJson(BACKPACK_LISTINGS_PATH, { ok: false });
-    const schema = readJson(BACKPACK_PRICE_SCHEMA_PATH, { ok: false, prices: [] });
+    const schema = readPriceSchemaJson({ ok: false, prices: [] });
     return compactObject({
       ok: Boolean(cache.ok),
       updated_at: cache.updated_at || null,
@@ -13194,7 +13222,7 @@ async function handleApi(req, res, pathname) {
       ok: true,
       app: APP_NAME,
       version: APP_VERSION,
-      scope: '5.13.50 – Hard Operation Watchdog + Stale Lock Release',
+      scope: '5.13.55 – Backpack Price Schema Memory Cache',
       mode: 'operations_cockpit_notifications_persistence_listing_engine_targeted_orders_multi_account_strategy_ollama',
       steam_web_api_key_saved: Boolean(options.steam_web_api_key),
       steam_web_api_key: redacted(options.steam_web_api_key),
@@ -14340,5 +14368,5 @@ __server.listen(PORT, HOST, () => {
     runtimeLogger.error('startup', 'vault_loaded_failed', 'Main account vault startup status failed', runtimeErrorContext(error));
   }
   runtimeLogger.info('startup', 'config_loaded', 'Runtime options loaded', runtimeLoggerOptions());
-  console.log(`[tf2-hub] ${APP_VERSION} Hard operation watchdog + stale lock release + elapsed fix`);
+  console.log(`[tf2-hub] ${APP_VERSION} Price schema memory cache + safer manual maintainer`);
 });

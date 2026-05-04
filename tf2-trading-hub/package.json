@@ -1,6 +1,6 @@
 {
   "name": "tf2-trading-hub-addon",
-  "version": "5.13.54",
+  "version": "5.13.55",
   "private": true,
   "main": "dist/server.js",
   "scripts": {
@@ -8,5 +8,5 @@
     "start": "node dist/server.js"
   },
   "dependencies": {},
-  "description": "TF2 Trading Hub: fix event-loop block crash after provider sync (Maintain now SIGKILL); yield points added before heavy post-sync work."
+  "description": "TF2 Trading Hub: cache Backpack.tf price schema in memory to reduce maintainer CPU spikes and SIGKILL risk."
 }
