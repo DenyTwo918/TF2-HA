@@ -10,9 +10,9 @@
   <main class="shell">
     <section class="hero hubHero">
       <div>
-        <p class="eyebrow">Home Assistant add-on · 5.13.44 · Main Account No-Wipe Guard + Crash Trace</p>
+        <p class="eyebrow">Home Assistant add-on · 5.13.45 · Main Account Save Must Never Hang</p>
         <h1>TF2 Trading Hub</h1>
-        <p class="lead">Production dashboard: Main account no-wipe guard active; last-good restore on startup; crash trace to last-crash file; migration state skip.</p><div class="buildBanner"><b>Build 5.13.44 loaded</b><span>Main account vault never overwritten by empty values; restores from last-good on startup; per-job scheduler crash isolation; persistence debug card.</span></div>
+        <p class="lead">Production dashboard: Fast local-only credential save; hard 1500ms timeout; scheduler skips while save is active.</p><div class="buildBanner"><b>Build 5.13.45 loaded</b><span>Save endpoint is fully local — no Backpack.tf/Steam calls; returns within 500ms; 1500ms hard timeout returns HTTP 504; scheduler skips tick during save.</span></div>
         <div class="heroActions diagnosticFirstActions">
           <button id="runDiagnosticBundle" class="primary">Diagnostic bundle for assistant</button>
           <button id="refreshAll">Refresh cockpit</button><button id="toggleSimpleUi">Show advanced UI</button>

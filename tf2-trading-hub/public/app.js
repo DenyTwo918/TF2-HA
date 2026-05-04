@@ -53,7 +53,7 @@ function updateSimpleUiButton(){const b=document.getElementById('toggleSimpleUi'
 (function initSimpleUi(){try{const forcedKey='tf2_hub_simple_for_5_12_79';if(localStorage.getItem(forcedKey)!=='done'){document.body.classList.add('simple-ui');localStorage.setItem('tf2_hub_ui_mode','simple');localStorage.setItem(forcedKey,'done');}else if(localStorage.getItem('tf2_hub_ui_mode')!=='advanced')document.body.classList.add('simple-ui');setTimeout(updateSimpleUiButton,0);}catch{document.body.classList.add('simple-ui');}})();
 function setSda(value){qs('#sdaOutput').textContent=typeof value==='string'?value:JSON.stringify(value,null,2);}
 function saveJsonDownload(fileName,value){try{const blob=new Blob([JSON.stringify(value,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=fileName||"tf2-hub-diagnostic.json";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);return true;}catch(error){setLog({ok:false,error:'Browser download failed',detail:String(error&&error.message?error.message:error)});return false;}}
-async function downloadCachedDiagnosticFallback(reason){const fallback={ok:false,version:'5.13.44',title:'Client-side diagnostic download fallback',generated_at:new Date().toISOString(),source:'browser_fallback',error:String(reason&&reason.message?reason.message:reason||'Unknown diagnostic download error'),safety_note:'Client fallback only. No live trade, Steam confirmation or Backpack.tf write was executed.'};try{const cached=await api('/api/diagnostics/bundle').catch(()=>null);if(cached&&typeof cached==='object'){cached.client_download_fallback_reason=fallback.error;saveJsonDownload(cached.file_name||('tf2-hub-diagnostic-cached-'+(cached.version||'bundle')+'.json'),cached);return cached;}}catch{}saveJsonDownload('tf2-hub-diagnostic-client-fallback.json',fallback);return fallback;}
+async function downloadCachedDiagnosticFallback(reason){const fallback={ok:false,version:'5.13.45',title:'Client-side diagnostic download fallback',generated_at:new Date().toISOString(),source:'browser_fallback',error:String(reason&&reason.message?reason.message:reason||'Unknown diagnostic download error'),safety_note:'Client fallback only. No live trade, Steam confirmation or Backpack.tf write was executed.'};try{const cached=await api('/api/diagnostics/bundle').catch(()=>null);if(cached&&typeof cached==='object'){cached.client_download_fallback_reason=fallback.error;saveJsonDownload(cached.file_name||('tf2-hub-diagnostic-cached-'+(cached.version||'bundle')+'.json'),cached);return cached;}}catch{}saveJsonDownload('tf2-hub-diagnostic-client-fallback.json',fallback);return fallback;}
 function renderDiagnosticBundle(data){
   const el=qs("#diagnosticBundleStatus");if(!el)return;
   if(!data){el.innerHTML='<p class="muted">No diagnostic bundle yet.</p>';return;}
@@ -724,7 +724,7 @@ async function refresh(){
     safe('/api/opportunities','opportunities snapshot',12000).then(renderOpportunities)
   ]).catch(()=>{});
   scheduleLiveDashboardRefresh(250);
-  setLog({ok:true,version:(versionAudit&&versionAudit.expected)||'5.13.44',hydrated_dashboard_load:true,message:'Dashboard loaded. Live status will keep hydrating in the background.'});
+  setLog({ok:true,version:(versionAudit&&versionAudit.expected)||'5.13.45',hydrated_dashboard_load:true,message:'Dashboard loaded. Live status will keep hydrating in the background.'});
 }
 async function loadJsonTo(selector,path,options){const data=await api(path,options);qs(selector).textContent=JSON.stringify(data,null,2);return data;}
 async function runReview(){qs('#review').disabled=true;try{await loadJsonTo('#logs','/api/review/run',{method:'POST',body:'{}'});await api('/api/trading-core/build',{method:'POST',body:'{}'});await refresh();}catch(e){setLog(e.body||e.message);}finally{qs('#review').disabled=false;}}
@@ -754,8 +754,21 @@ async function saveSelectedCredentials(extra={}){
     const backpackApiVal=maskedInputValue(qs('#backpackApiKey')?.value); if(backpackApiVal)rawPayload.backpack_tf_api_key=backpackApiVal;
     const payload={...rawPayload,...extra};
     const started=performance.now();
-    const data=await api('/api/main-account/save',{method:'POST',body:JSON.stringify(payload),timeoutMs:10000});
-    const status=await api('/api/main-account/status',{timeoutMs:10000}).catch(()=>data);
+    let data;
+    try{
+      data=await api('/api/main-account/save-local-only',{method:'POST',body:JSON.stringify(payload),timeoutMs:3000});
+    }catch(saveErr){
+      const errMsg=saveErr&&saveErr.message?saveErr.message:'Save request failed';
+      const isTimeout=errMsg.includes('timeout')||errMsg.includes('504');
+      setLog({ok:false,error:errMsg,message:isTimeout?'Save timed out — the server may be busy. Try again in a moment.':'Save failed: '+errMsg,trace_id:(saveErr&&saveErr.trace_id)||''});
+      return null;
+    }
+    if(!data||!data.ok){
+      const errMsg=(data&&data.error)||'Save failed';
+      setLog({ok:false,version:data&&data.version,error:errMsg,trace_id:(data&&data.trace_id)||'',message:'Save failed: '+errMsg+(data&&data.trace_id?' (trace: '+data.trace_id+')':'')});
+      return data||null;
+    }
+    const status=await api('/api/main-account/status',{timeoutMs:5000}).catch(()=>data);
     const finalData=(status&&status.main_account)?{...status,save_result:data,save_verified:data.save_verified,verified:data.verified}:data;
     lastMainAccountSaveResult={ok:!!data.ok,verified:!!(data.verified||data.save_verified),duration_ms:Math.round(performance.now()-started),trace_id:data.trace_id||'',vault_source:(status&&status.source)||data.source||'',readiness:(status&&status.readiness)||data.readiness||''};
     renderCredentials(finalData);
@@ -766,8 +779,8 @@ async function saveSelectedCredentials(extra={}){
       if(qs('#backpackAccessToken'))qs('#backpackAccessToken').value='';
       if(qs('#backpackApiKey'))qs('#backpackApiKey').value='';
     }
-    setLog({ok:saveVerified,version:finalData.version||data.version,message:saveVerified?'Main account saved and verified':'Save attempted but verification did not see all credentials',saved_steam_id64:main.steam_id64||steamId,steam_id64_saved:!!(main.steam_id64_saved||main.steam_id64),steam_api_key_saved:!!(main.steam_web_api_key_saved||main.steam_api_key_saved),backpack_tf_access_token_saved:!!main.backpack_tf_access_token_saved,backpack_tf_api_key_saved:!!main.backpack_tf_api_key_saved,readiness:main.readiness||'unknown',save_verified:saveVerified,vault_path:finalData.vault_path||data.vault_path||'',caches_invalidated:!!data.caches_invalidated,last_save:lastMainAccountSaveResult});
-    await api('/api/main-account/status',{timeoutMs:10000}).then(renderCredentials).catch(()=>null);return finalData;
+    setLog({ok:saveVerified,version:finalData.version||data.version,message:saveVerified?'Main account saved and verified':'Save attempted but verification did not see all credentials',saved_steam_id64:main.steam_id64||steamId,steam_id64_saved:!!(main.steam_id64_saved||main.steam_id64),steam_api_key_saved:!!(main.steam_web_api_key_saved||main.steam_api_key_saved),backpack_tf_access_token_saved:!!main.backpack_tf_access_token_saved,backpack_tf_api_key_saved:!!main.backpack_tf_api_key_saved,readiness:main.readiness||'unknown',save_verified:saveVerified,vault_path:finalData.vault_path||data.vault_path||'',last_save:lastMainAccountSaveResult});
+    await api('/api/main-account/status',{timeoutMs:5000}).then(renderCredentials).catch(()=>null);return finalData;
   } finally {
     if(saveBtn){saveBtn.disabled=false;saveBtn.textContent=oldSaveText||'Save main account';}
     if(profileBtn){profileBtn.disabled=false;profileBtn.textContent=oldProfileText||'Save main account';}
@@ -999,7 +1012,7 @@ function renderLocalWorkflow(data){
 function renderPublishWizard(data){
   const el=document.getElementById('publishWizard');if(!el)return;
   if(!data||data.error){el.innerHTML=`<p class="muted">${esc2(data&&data.error||'No production dashboard data yet.')}</p>`;return;}
-  if(data.version&&data.ok&&data.steps===undefined&&data.candidate_draft_id===undefined&&data.classifieds_maintainer===undefined){el.innerHTML=`<p class="badText"><b>Production dashboard data mapping mismatch.</b> Refresh response was not /api/publish-wizard/status. Update to 5.13.44 or reload with Ctrl+F5.</p><pre>${esc2(JSON.stringify(data,null,2).slice(0,1000))}</pre>`;return;}
+  if(data.version&&data.ok&&data.steps===undefined&&data.candidate_draft_id===undefined&&data.classifieds_maintainer===undefined){el.innerHTML=`<p class="badText"><b>Production dashboard data mapping mismatch.</b> Refresh response was not /api/publish-wizard/status. Update to 5.13.45 or reload with Ctrl+F5.</p><pre>${esc2(JSON.stringify(data,null,2).slice(0,1000))}</pre>`;return;}
   const maint=data.classifieds_maintainer||{};
   const autoSell=data.auto_sell_relister||{};
   const manualOwnedSell=data.manual_owned_sell_detector||{};
