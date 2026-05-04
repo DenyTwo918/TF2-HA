@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
 set -eu
-printf '%s\n' "[tf2-hub] version: 5.13.40"
-printf '%s\n' "[tf2-hub] Backpack.tf-first cockpit; SDA handled by embedded SDA Bridge helper"
+printf '%s\n' "[tf2-hub] version: 5.13.41"
+printf '%s\n' "[tf2-hub] Backpack.tf API key / price schema fix active"
 exec node /app/dist/server.js

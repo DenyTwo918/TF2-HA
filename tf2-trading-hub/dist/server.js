@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const APP_VERSION = '5.13.40';
+const APP_VERSION = '5.13.41';
 const APP_NAME = 'TF2 Trading Hub';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -246,7 +246,7 @@ function writeJson(filePath, value) {
   fs.renameSync(tmp, filePath);
   __notifyWatchers(filePath);
 }
-// 5.13.40: cache invalidation hooks.  When a file the publish wizard reads
+// 5.13.41: cache invalidation hooks.  When a file the publish wizard reads
 // gets rewritten, we drop the cached status so the next request rebuilds.
 const __writeWatchers = new Map();
 function __notifyWatchers(filePath) {
@@ -258,7 +258,7 @@ function watchJsonWrite(filePath, fn) {
   if (!__writeWatchers.has(filePath)) __writeWatchers.set(filePath, new Set());
   __writeWatchers.get(filePath).add(fn);
 }
-// 5.13.40: writes only when the serialized value actually changed.  Uses an
+// 5.13.41: writes only when the serialized value actually changed.  Uses an
 // in-memory hash cache to avoid the round-trip read; falls back to a one-time
 // disk hash when the process restarts.  Eliminates the disk-I/O storm caused by
 // the dashboard re-writing PUBLISH_WIZARD_PATH every 8s with identical data.
@@ -299,7 +299,7 @@ function bool(value, fallback = false) {
   return fallback;
 }
 
-// ── 5.13.40 – Runtime Event Logger ─────────────────────────────────────
+// ── 5.13.41 – Runtime Event Logger ─────────────────────────────────────
 const RUNTIME_LOG_LEVELS = { error: 0, warn: 1, info: 2, debug: 3, audit: 2 };
 const RUNTIME_SECRET_KEY_RE = /(token|secret|password|passwd|cookie|session|authorization|steamloginsecure|shared_secret|identity_secret|refresh|mafile|api[_-]?key|steam_web_api_key|steam_api_key|backpack_tf_access_token|backpack_tf_api_key|access_token|sda_password)/i;
 function runtimeLoggerOptions() {
@@ -544,19 +544,23 @@ function mainAccountVaultShape(account = {}, source = 'canonical') {
   };
 }
 function credentialSavedStatus(account = {}) {
+  const accessTokenSaved = Boolean(account.backpack_tf_access_token);
+  const apiKeySaved = Boolean(account.backpack_tf_api_key);
   return {
     steam_web_api_key_saved: Boolean(account.steam_web_api_key),
     steam_api_key_saved: Boolean(account.steam_web_api_key),
-    backpack_tf_access_token_saved: Boolean(account.backpack_tf_access_token),
-    backpack_tf_api_key_saved: Boolean(account.backpack_tf_api_key),
-    backpack_tf_token_saved: Boolean(account.backpack_tf_access_token || account.backpack_tf_api_key),
+    backpack_tf_access_token_saved: accessTokenSaved,
+    backpack_tf_api_key_saved: apiKeySaved,
+    // Compatibility flag: older UI/log code used this as a generic Backpack credential marker.
+    backpack_tf_token_saved: Boolean(accessTokenSaved || apiKeySaved),
+    backpack_tf_provider_credentials_saved: Boolean(accessTokenSaved && apiKeySaved),
     steam_id64_saved: Boolean(account.steam_id64)
   };
 }
 function publicMainAccountStatus(account = {}, source = 'canonical') {
   const normalized = normalizeMainAccountRecord(account, source);
   const saved = credentialSavedStatus(normalized);
-  const needsSetup = !(saved.steam_id64_saved && saved.steam_web_api_key_saved && saved.backpack_tf_token_saved);
+  const needsSetup = !(saved.steam_id64_saved && saved.steam_web_api_key_saved && saved.backpack_tf_access_token_saved && saved.backpack_tf_api_key_saved);
   return {
     id: 'main',
     role: 'main',
@@ -574,11 +578,14 @@ function publicMainAccountStatus(account = {}, source = 'canonical') {
     backpack_tf_access_token_saved: saved.backpack_tf_access_token_saved,
     backpack_tf_api_key_saved: saved.backpack_tf_api_key_saved,
     backpack_tf_token_saved: saved.backpack_tf_token_saved,
+    backpack_tf_provider_credentials_saved: saved.backpack_tf_provider_credentials_saved,
     readiness: needsSetup ? 'needs_setup' : 'ready',
     needs_setup: needsSetup,
     missing: {
       steamid64: !saved.steam_id64_saved,
       steam_api_key: !saved.steam_web_api_key_saved,
+      backpack_access_token: !saved.backpack_tf_access_token_saved,
+      backpack_api_key: !saved.backpack_tf_api_key_saved,
       backpack_token: !saved.backpack_tf_token_saved
     },
     updated_at: normalized.updated_at || null,
@@ -750,6 +757,9 @@ function canonicalMainAccountStatusResponse(extra = {}) {
     steamid64: canonicalFieldWord(publicStatus.steam_id64_saved),
     steam_api_key: canonicalFieldWord(publicStatus.steam_web_api_key_saved),
     backpack_tf_token: canonicalFieldWord(publicStatus.backpack_tf_token_saved),
+    backpack_tf_access_token: canonicalFieldWord(publicStatus.backpack_tf_access_token_saved),
+    backpack_tf_api_key: canonicalFieldWord(publicStatus.backpack_tf_api_key_saved),
+    backpack_tf_provider_credentials: canonicalFieldWord(publicStatus.backpack_tf_access_token_saved && publicStatus.backpack_tf_api_key_saved),
     scope: 'main_only',
     updated_at: publicStatus.updated_at || vault.updated_at || null,
     readiness: publicStatus.readiness,
@@ -764,7 +774,7 @@ function canonicalMainAccountStatusResponse(extra = {}) {
   try { runtimeLogVaultStatus('status_read', response.main_account, { endpoint: 'main-account/status', vault_exists: vaultExists, source }); } catch {}
   return response;
 }
-// ── 5.13.40 – Provider readiness health ───────────────────────────────
+// ── 5.13.41 – Provider readiness health ───────────────────────────────
 function providerHealthText(value, depth = 0, seen = new WeakSet()) {
   try {
     if (value === null || value === undefined) return '';
@@ -857,11 +867,10 @@ function providerHealthState() {
     providerHealthNumber(priceSchemaRaw, ['prices_count', 'summary.prices_count', 'count', 'total']),
     providerHealthCountCollection(priceSchemaRaw, ['items', 'prices', 'schema', 'entries', 'results'])
   );
-  const pricelistCount = Math.max(
-    providerHealthNumber(pricelistRaw, ['prices_count', 'items_count', 'count', 'total']),
-    providerHealthCountCollection(pricelistRaw, ['items', 'prices', 'entries', 'results'])
-  );
-  const priceCount = Math.max(priceSchemaCount, pricelistCount);
+  const listingCachePriceCount = providerHealthNumber(listingsRaw, ['prices_count', 'summary.prices_count']);
+  // 5.13.41: do not treat the legacy Steam offer pricelist as Backpack.tf market price schema.
+  // That file can contain a few trade-review entries and caused a false "prices ready" state with 0 schema prices.
+  const priceCount = Math.max(priceSchemaCount, listingCachePriceCount);
   const inventoryItems = Math.max(
     providerHealthNumber(inventoryRaw, ['items_count', 'summary.items', 'summary.total_items', 'inventory.items', 'count', 'total']),
     providerHealthCountCollection(inventoryRaw, ['items', 'inventory', 'assets', 'entries'])
@@ -882,13 +891,13 @@ function providerHealthState() {
   const inventoryPriced = pricedItems > 0;
   const tokenValid = tokenSaved ? (invalidToken ? false : ((provider.last_ok_at || listingsCount > 0) ? true : null)) : false;
   const tokenState = !tokenSaved ? 'missing' : invalidToken ? 'invalid_401' : tokenValid === true ? 'ok' : 'unknown_not_verified_yet';
-  const priceState = priceSchemaReady ? 'ready' : (apiKeyMissing || !apiKeySaved ? 'api_key_missing_or_price_sync_failed' : 'missing');
+  const priceState = priceSchemaReady ? 'ready' : (!apiKeySaved ? 'api_key_missing' : (apiKeyMissing ? 'api_key_missing_or_price_sync_failed' : 'price_sync_failed_or_empty'));
 
   let readiness = 'ready';
   let recommendedNextAction = 'Provider health looks ready.';
   if (accountStatus.needs_setup) {
     readiness = 'credentials_missing';
-    recommendedNextAction = 'Fill SteamID64, Steam Web API key and Backpack.tf token/API key, then save Main account.';
+    recommendedNextAction = 'Fill SteamID64, Steam Web API key, Backpack.tf access token and Backpack.tf API key, then save Main account.';
   } else if (invalidToken) {
     readiness = 'backpack_token_invalid';
     recommendedNextAction = 'Backpack.tf returned 401 / invalid token. Generate a fresh Backpack.tf access token/API key, paste it into Main account, save, restart the add-on and run Local Workflow.';
@@ -908,7 +917,7 @@ function providerHealthState() {
     { id: 'credentials_saved', label: 'Credentials saved', ready: !accountStatus.needs_setup, state: accountStatus.needs_setup ? 'missing' : 'saved', detail: accountStatus.missing || {} },
     { id: 'backpack_access_token_saved', label: 'Backpack access token saved', ready: tokenSaved, state: tokenSaved ? 'saved' : 'missing' },
     { id: 'backpack_access_token_valid', label: 'Backpack access token valid', ready: tokenValid === true, state: tokenState, detail: invalidToken ? 'Backpack.tf returned 401 / invalid token in the last sync.' : 'Based on last provider sync/listing fetch.' },
-    { id: 'backpack_api_key_saved', label: 'Backpack API key saved', ready: apiKeySaved || priceSchemaReady, state: apiKeySaved ? 'saved' : 'not_saved_or_not_required_by_field', detail: apiKeyMissing ? 'Price schema sync reported API key missing.' : '' },
+    { id: 'backpack_api_key_saved', label: 'Backpack API key saved', ready: apiKeySaved, state: apiKeySaved ? 'saved' : 'missing', detail: apiKeyMissing || !apiKeySaved ? 'Required for Backpack.tf IGetPrices/v4 price schema.' : '' },
     { id: 'backpack_price_schema_ready', label: 'Backpack price schema ready', ready: priceSchemaReady, state: priceState, count: priceCount },
     { id: 'steam_inventory_ready', label: 'Steam inventory ready', ready: steamInventoryReady, state: steamInventoryReady ? 'ready' : 'missing', count: inventoryItems },
     { id: 'inventory_priced', label: 'Inventory priced', ready: inventoryPriced, state: inventoryPriced ? 'ready' : 'unpriced', count: pricedItems },
@@ -1010,7 +1019,7 @@ function isolatedMainAccountSave(payload = {}, requestId = runtimeRequestId()) {
   const startedAt = Date.now();
   const traceId = payload.__save_trace_id || requestId;
   const trace = (event, data = {}) => mainAccountSaveTrace(event, { trace_id: traceId, elapsed_ms: Date.now() - startedAt, ...data });
-  trace('main-account.save.start', { has_steamid64: Boolean(payload.steam_id64 || payload.steamid64), has_steam_api_key: Boolean(payload.steam_web_api_key || payload.steam_api_key), has_backpack_token: Boolean(payload.backpack_tf_access_token || payload.backpack_tf_token || payload.backpack_token || payload.backpack_tf_api_key) });
+  trace('main-account.save.start', { has_steamid64: Boolean(payload.steam_id64 || payload.steamid64), has_steam_api_key: Boolean(payload.steam_web_api_key || payload.steam_api_key), has_backpack_access_token: Boolean(payload.backpack_tf_access_token || payload.backpack_tf_token || payload.backpack_token), has_backpack_api_key: Boolean(payload.backpack_tf_api_key || payload.backpack_api_key || payload.api_key) });
   runtimeLogger.info('main_account', 'main-account.save.start', 'Main account isolated save started', { requestId, trace_id: traceId });
   const currentVault = readCanonicalMainAccountVaultStrict();
   const current = currentVault.main_account || {};
@@ -1020,11 +1029,12 @@ function isolatedMainAccountSave(payload = {}, requestId = runtimeRequestId()) {
   const missing = [];
   if (!candidate.steam_id64) missing.push('steamid64');
   if (!candidate.steam_web_api_key) missing.push('steam_api_key');
-  if (!(candidate.backpack_tf_access_token || candidate.backpack_tf_api_key)) missing.push('backpack_tf_token');
+  if (!candidate.backpack_tf_access_token) missing.push('backpack_tf_access_token');
+  if (!candidate.backpack_tf_api_key) missing.push('backpack_tf_api_key');
   if (missing.length) {
     trace('main-account.save.validation_failed', { missing });
     runtimeLogger.warn('main_account', 'main-account.save.validation_failed', 'Main account save validation failed', { requestId, trace_id: traceId, missing });
-    return { ok: false, version: APP_VERSION, saved: false, verified: false, error: 'Missing required Main account credential fields.', missing, status: { steamid64: canonicalFieldWord(Boolean(candidate.steam_id64)), steam_api_key: canonicalFieldWord(Boolean(candidate.steam_web_api_key)), backpack_tf_token: canonicalFieldWord(Boolean(candidate.backpack_tf_access_token || candidate.backpack_tf_api_key)), scope: 'main_only' }, trace_id: traceId, elapsed_ms: Date.now() - startedAt, secrets_returned: false };
+    return { ok: false, version: APP_VERSION, saved: false, verified: false, error: 'Missing required Main account credential fields.', missing, status: { steamid64: canonicalFieldWord(Boolean(candidate.steam_id64)), steam_api_key: canonicalFieldWord(Boolean(candidate.steam_web_api_key)), backpack_tf_access_token: canonicalFieldWord(Boolean(candidate.backpack_tf_access_token)), backpack_tf_api_key: canonicalFieldWord(Boolean(candidate.backpack_tf_api_key)), backpack_tf_token: canonicalFieldWord(Boolean(candidate.backpack_tf_access_token || candidate.backpack_tf_api_key)), scope: 'main_only' }, trace_id: traceId, elapsed_ms: Date.now() - startedAt, secrets_returned: false };
   }
   const vault = mainAccountVaultShape(candidate, 'canonical_vault');
   trace('main-account.save.write_start', { vault_path: MAIN_ACCOUNT_VAULT_PATH });
@@ -1032,9 +1042,9 @@ function isolatedMainAccountSave(payload = {}, requestId = runtimeRequestId()) {
   trace('main-account.save.write_ok', { vault_path: MAIN_ACCOUNT_VAULT_PATH });
   runtimeLogger.info('main_account', 'main-account.save.write_ok', 'Canonical Main account vault written', { requestId, trace_id: traceId, vault_path: MAIN_ACCOUNT_VAULT_PATH });
   const verifyStatus = canonicalMainAccountStatusResponse({ save_trace_id: traceId });
-  const verified = Boolean(verifyStatus.steamid64 === 'present' && verifyStatus.steam_api_key === 'present' && verifyStatus.backpack_tf_token === 'present');
-  trace(verified ? 'main-account.save.verify_ok' : 'main-account.save.verify_failed', { steamid64: verifyStatus.steamid64, steam_api_key: verifyStatus.steam_api_key, backpack_tf_token: verifyStatus.backpack_tf_token, readiness: verifyStatus.readiness });
-  runtimeLogger.info('main_account', verified ? 'main-account.save.verify_ok' : 'main-account.save.verify_failed', 'Canonical Main account vault verification finished', { requestId, trace_id: traceId, verified, steamid64: verifyStatus.steamid64, steam_api_key: verifyStatus.steam_api_key, backpack_tf_token: verifyStatus.backpack_tf_token });
+  const verified = Boolean(verifyStatus.steamid64 === 'present' && verifyStatus.steam_api_key === 'present' && verifyStatus.backpack_tf_access_token === 'present' && verifyStatus.backpack_tf_api_key === 'present');
+  trace(verified ? 'main-account.save.verify_ok' : 'main-account.save.verify_failed', { steamid64: verifyStatus.steamid64, steam_api_key: verifyStatus.steam_api_key, backpack_tf_access_token: verifyStatus.backpack_tf_access_token, backpack_tf_api_key: verifyStatus.backpack_tf_api_key, readiness: verifyStatus.readiness });
+  runtimeLogger.info('main_account', verified ? 'main-account.save.verify_ok' : 'main-account.save.verify_failed', 'Canonical Main account vault verification finished', { requestId, trace_id: traceId, verified, steamid64: verifyStatus.steamid64, steam_api_key: verifyStatus.steam_api_key, backpack_tf_access_token: verifyStatus.backpack_tf_access_token, backpack_tf_api_key: verifyStatus.backpack_tf_api_key });
   const duration = Date.now() - startedAt;
   trace('main-account.save.done', { duration_ms: duration, verified });
   runtimeLogger.info('main_account', 'main-account.save.done', 'Main account isolated save finished', { requestId, trace_id: traceId, duration_ms: duration, verified });
@@ -1047,7 +1057,7 @@ function isolatedMainAccountSave(payload = {}, requestId = runtimeRequestId()) {
     trace_id: traceId,
     elapsed_ms: duration,
     vault_path: MAIN_ACCOUNT_VAULT_PATH,
-    status: { steamid64: verifyStatus.steamid64, steam_api_key: verifyStatus.steam_api_key, backpack_tf_token: verifyStatus.backpack_tf_token, scope: 'main_only' },
+    status: { steamid64: verifyStatus.steamid64, steam_api_key: verifyStatus.steam_api_key, backpack_tf_access_token: verifyStatus.backpack_tf_access_token, backpack_tf_api_key: verifyStatus.backpack_tf_api_key, backpack_tf_token: verifyStatus.backpack_tf_token, scope: 'main_only' },
     secrets_returned: false
   };
 }
@@ -1372,7 +1382,7 @@ function getOptions() {
     backpack_tf_enabled: bool(options.backpack_tf_enabled, true),
     backpack_tf_access_token: String(credentialAccount.backpack_tf_access_token || options.backpack_tf_access_token || '').trim(),
     backpack_tf_api_key: String(credentialAccount.backpack_tf_api_key || options.backpack_tf_api_key || '').trim(),
-    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.40').trim(),
+    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.41').trim(),
     backpack_tf_base_url: String(options.backpack_tf_base_url || 'https://backpack.tf').replace(/\/$/, ''),
     backpack_tf_cache_ttl_minutes: clamp(options.backpack_tf_cache_ttl_minutes, 30, 1, 1440),
     backpack_tf_retry_count: clamp(options.backpack_tf_retry_count, 2, 0, 5),
@@ -3045,7 +3055,7 @@ class BackpackTfV2ListingManager {
     return configured.endsWith('/api') ? configured : `${configured}/api`;
   }
   headers(authMode = 'token') {
-    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.40' };
+    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.41' };
     if (authMode === 'token' && this.options.backpack_tf_access_token) headers['X-Auth-Token'] = this.options.backpack_tf_access_token;
     if (authMode === 'bearer' && this.options.backpack_tf_access_token) headers.authorization = `Bearer ${this.options.backpack_tf_access_token}`;
     if (authMode === 'api_key_header' && this.options.backpack_tf_api_key) headers['x-api-key'] = this.options.backpack_tf_api_key;
@@ -3275,7 +3285,7 @@ class BackpackTfV2ListingManager {
       prices_sample: pricesResult.sample || [],
       attempts: [...(listingsResult.attempts || []), ...(pricesResult.ok ? [{ label: 'IGetPrices/v4', ok: true, prices: pricesResult.prices_count }] : (pricesResult.skipped ? [{ label: 'IGetPrices/v4', skipped: true, error: pricesResult.error }] : [{ label: 'IGetPrices/v4', ok: false, status: pricesResult.status, error: pricesResult.error }]))],
       errors: [listingsResult.ok ? null : listingsResult.error, pricesResult.ok || pricesResult.skipped ? null : pricesResult.error].filter(Boolean),
-      guidance: listingsResult.ok ? 'Account listings cache is ready.' : (pricesResult.ok ? 'Only public price schema synced. Save a Backpack.tf user access token in UI to read your account listings.' : 'Backpack.tf sync failed. Check token/API key and provider attempts below.')
+      guidance: listingsResult.ok && pricesResult.ok ? 'Account listings and price schema are ready.' : (listingsResult.ok && !pricesResult.ok ? 'Account listings are ready, but price schema is missing. Paste/save the Backpack.tf API key and run Sync Backpack.tf again.' : (pricesResult.ok ? 'Only public price schema synced. Save a Backpack.tf user access token in UI to read your account listings.' : 'Backpack.tf sync failed. Check access token/API key and provider attempts below.'))
     };
     writeJson(BACKPACK_LISTINGS_PATH, cache);
     this.audit.write(cache.ok ? 'backpack_tf_sync_completed' : 'backpack_tf_sync_failed', { stage: cache.stage, listings: cache.listings_count, prices: cache.prices_count, errors: cache.errors });
@@ -4198,7 +4208,7 @@ class DataPersistenceMigrationService {
     return { ok: true, exported_at: new Date().toISOString(), schema_version: DATA_SCHEMA_VERSION, payload };
   }
 }
-// 5.13.40: bounded redactor.  The unbounded version walked the entire market
+// 5.13.41: bounded redactor.  The unbounded version walked the entire market
 // classifieds mirror (1000+ items, deeply nested) on every dashboard poll, which
 // pegged CPU and ballooned RAM on small Home Assistant hosts.  We now cap depth,
 // array length, and key count, returning a placeholder past the limits.  Secret
@@ -4865,7 +4875,7 @@ class HubListingDraftService {
     } catch (err) {
       providerStatus = 'error';
       providerSummary = safeError(err);
-      friendly = String(safeError(err)).includes('apiBase is not a function') ? 'Internal publish executor bug: apiBase helper was not wired. Update to 5.13.40 or newer.' : friendlyPublishError('network_or_timeout', safeError(err));
+      friendly = String(safeError(err)).includes('apiBase is not a function') ? 'Internal publish executor bug: apiBase helper was not wired. Update to 5.13.41 or newer.' : friendlyPublishError('network_or_timeout', safeError(err));
     }
     const syncedProviderPayloadPreview = {
       ...(built.draft.provider_payload_preview || {}),
@@ -6171,7 +6181,7 @@ function buildPublishWizardStatus() {
   return result;
 }
 
-// 5.13.40 – cached + lite publish wizard status.
+// 5.13.41 – cached + lite publish wizard status.
 //
 // The dashboard polls /api/publish-wizard/status every 8s.  The full builder
 // reads ~10 JSON files, runs 12+ status sub-builders, walks each result through
@@ -7609,7 +7619,7 @@ class SteamInventorySyncService {
       let accepted = null;
       let lastFailure = null;
       for (const variant of this.inventoryUrls(options.steam_id64, startAssetId)) {
-        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.40' } });
+        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.41' } });
         const body = result.body || {};
         const parsed = result.ok ? this.extractInventoryPayload(body) : { ok: false, error: result.error || body.error || body.raw || `HTTP ${result.status}` };
         attempts.push({
@@ -7734,12 +7744,15 @@ class TradingBrainService {
     const mainStatus = (credentials.account_status || []).find(a => a.role === 'main' || a.id === accounts.main_account_id) || {};
     if (!mainStatus.steam_id64_saved) blocked.push({ id: 'main_steamid_missing', category: 'account', title: 'Main SteamID64 missing', message: 'Save the main account SteamID64 before inventory and offer review can work.' });
     if (!mainStatus.steam_web_api_key_saved) warnings.push({ id: 'steam_api_missing', category: 'credentials', title: 'Steam API key missing', message: 'Trade offer review needs a Steam Web API key saved in the UI credential vault.' });
-    if (!mainStatus.backpack_tf_token_saved) warnings.push({ id: 'backpack_token_missing', category: 'credentials', title: 'Backpack.tf token/API key missing', message: 'Backpack.tf pricing and listings need a saved provider token or API key.' });
-    if (backpackCache.prices_ok || Number(backpackCache.prices_count || 0) > 0 || Array.isArray(priceSchema.prices)) {
-      recommendations.push({ id: 'prices_ready', severity: 'success', category: 'backpack', title: 'Backpack.tf prices ready', message: String(Number(backpackCache.prices_count || priceSchema.prices?.length || 0)) + ' price entries are available.', action: 'none' });
+    if (!mainStatus.backpack_tf_access_token_saved) warnings.push({ id: 'backpack_access_token_missing', category: 'credentials', title: 'Backpack.tf access token missing', message: 'Own account listings/classifieds need the Backpack.tf access token.' });
+    if (!mainStatus.backpack_tf_api_key_saved) warnings.push({ id: 'backpack_api_key_missing', category: 'credentials', title: 'Backpack.tf API key missing', message: 'Price schema sync needs the Backpack.tf API key. The access token alone can read own listings but cannot fill prices.' });
+    const priceEntriesAvailable = Boolean((backpackCache.prices_ok && Number(backpackCache.prices_count || 0) > 0) || Number(backpackCache.prices_count || 0) > 0 || (Array.isArray(priceSchema.prices) && priceSchema.prices.length > 0));
+    const priceEntryCount = Number(backpackCache.prices_count || (Array.isArray(priceSchema.prices) ? priceSchema.prices.length : 0) || 0);
+    if (priceEntriesAvailable) {
+      recommendations.push({ id: 'prices_ready', severity: 'success', category: 'backpack', title: 'Backpack.tf prices ready', message: String(priceEntryCount) + ' price entries are available.', action: 'none' });
     } else {
-      warnings.push({ id: 'prices_missing', category: 'backpack', title: 'Backpack.tf prices missing', message: 'Run Sync Backpack.tf to load price schema.' });
-      nextActions.push({ id: 'next_sync_backpack', type: 'sync', label: 'Sync Backpack.tf prices', safe: true, live: false, requires_confirmation: false, action: 'sync_backpack' });
+      warnings.push({ id: 'prices_missing', category: 'backpack', title: 'Backpack.tf prices missing', message: mainStatus.backpack_tf_api_key_saved ? 'Backpack.tf API key is saved, but price schema still has 0 entries. Run Sync Backpack.tf and check provider details.' : 'Backpack.tf API key is missing. Paste/save the API key, then run Sync Backpack.tf to load price schema.' });
+      nextActions.push({ id: 'next_sync_backpack', type: 'sync', label: 'Save API key + sync Backpack.tf prices', safe: true, live: false, requires_confirmation: false, action: 'sync_backpack' });
     }
     if (Number(backpackCache.listings_count || 0) === 0) recommendations.push({ id: 'own_listings_empty', severity: 'info', category: 'backpack', title: 'No own listings yet', message: 'This is normal if the account has not posted Backpack.tf listings.', action: 'none' });
     if (!inventory.synced) {
@@ -7750,7 +7763,9 @@ class TradingBrainService {
     }
     const candidateCount = Number(scanner.summary?.total_candidates || scanner.candidates?.length || 0);
     const watchlistCount = Number(watchlist.items?.length || scanner.watchlist?.length || 0);
-    if (candidateCount === 0) {
+    if (!priceEntriesAvailable) {
+      recommendations.push({ id: 'scanner_blocked_by_prices', severity: 'warn', category: 'market', title: 'Market scanner blocked by missing prices', message: 'No market candidates can be built until Backpack.tf price schema has entries.', action: 'sync_backpack' });
+    } else if (candidateCount === 0) {
       recommendations.push({ id: 'scanner_empty', severity: 'info', category: 'market', title: 'No trade candidates yet', message: 'Backpack.tf prices are synced, but current scanner filters produced no trade candidates. Build a relaxed/watchlist view.', action: 'build_scanner_relaxed' });
       nextActions.push({ id: 'next_build_watchlist', type: 'plan', label: 'Build relaxed market watchlist', safe: true, live: false, requires_confirmation: false, action: 'build_scanner_relaxed' });
     } else {
@@ -7777,8 +7792,8 @@ class TradingBrainService {
       accounts: { total: accountList.length, enabled: enabledAccounts.length, ...countByRole(accountList) },
       credential_status: { active_account_id: credentials.active_account_id || 'main', accounts: (credentials.account_status || []).map(a => ({ id: a.id, label: a.label, role: a.role, credentials: publicCredentialSummary(a), readiness: a.readiness })) },
       inventory,
-      market: { prices_seen: Number(backpackCache.prices_count || priceSchema.prices?.length || 0), candidates: candidateCount, watchlist: watchlistCount, scanner_mode: scanner.mode || options.market_scanner_mode || 'balanced' },
-      backpack: { own_listings: Number(backpackCache.listings_count || 0), prices_ok: Boolean(backpackCache.prices_ok || priceSchema.ok), cache_stage: backpackCache.stage || null },
+      market: { prices_seen: priceEntryCount, candidates: candidateCount, watchlist: watchlistCount, scanner_mode: scanner.mode || options.market_scanner_mode || 'balanced' },
+      backpack: { own_listings: Number(backpackCache.listings_count || 0), prices_ok: priceEntriesAvailable, cache_stage: backpackCache.stage || null },
       offers,
       listings: { planned_actions: Array.isArray(listingPlan.actions) ? listingPlan.actions.length : 0 },
       actionable_plan: { ok: Boolean(actionablePlan.ok), actions: Array.isArray(actionablePlan.actions) ? actionablePlan.actions.length : 0, watchlist: Array.isArray(actionablePlan.watchlist) ? actionablePlan.watchlist.length : 0, protected_currency_items: Number(actionablePlan.summary?.protected_currency_items || 0) },
@@ -11663,6 +11678,7 @@ class HubSetupService {
     const options = getOptions();
     const accounts = new MultiAccountPortfolioService(this.audit).list();
     const backpackCache = readJson(BACKPACK_LISTINGS_PATH, { ok: false });
+    const priceSchema = readJson(BACKPACK_PRICE_SCHEMA_PATH, { ok: false, prices: [] });
     const decisions = readJson(DECISIONS_PATH, { ok: false, decisions: [] });
     const pricing = readJson(PRICING_REPORT_PATH, { ok: false });
     const inventory = readJson(HUB_INVENTORY_PATH, { ok: false });
@@ -11670,19 +11686,24 @@ class HubSetupService {
     const state = readJson(STATE_PATH, {});
     const sdaConnected = Boolean(sdaStatus && sdaStatus.ok && (sdaStatus.connected || sdaStatus.status?.connected || sdaStatus.body?.connected));
     const steamId = options.steam_id64 || accounts.main_account?.steam_id64 || '';
+    const pricesCount = Number(backpackCache.prices_count || (Array.isArray(priceSchema.prices) ? priceSchema.prices.length : 0) || 0);
+    const priceSchemaReady = Boolean((backpackCache.prices_ok && pricesCount > 0) || pricesCount > 0);
+    const accountListingsReady = Boolean(backpackCache.ok && Number(backpackCache.listings_count || (Array.isArray(backpackCache.listings) ? backpackCache.listings.length : 0)) >= 0);
     const steps = [
       setupStep('main_account', 'Main account profile', Boolean(steamId), steamId ? `SteamID64 ${redacted(steamId)}` : 'Main account SteamID64 is not set.', 'Save SteamID64 in the Trade Hub UI.'),
       setupStep('steam_api_key', 'Steam Web API key', Boolean(options.steam_web_api_key), options.steam_web_api_key ? 'Saved in UI credential vault.' : 'Needed to fetch trade offers.', 'Save Steam Web API key in the Trade Hub UI.'),
-      setupStep('backpack_token', 'Backpack.tf token/API key', Boolean(options.backpack_tf_access_token || options.backpack_tf_api_key), options.backpack_tf_access_token || options.backpack_tf_api_key ? 'Saved in UI credential vault.' : 'Needed for live Backpack.tf provider requests.', 'Save Backpack.tf token/API key in the Trade Hub UI.'),
-      setupStep('provider_cache', 'Provider cache', Boolean(backpackCache.ok), backpackCache.ok ? `Prices ${Number(backpackCache.prices_count || 0)} · account listings ${Number(backpackCache.listings_count || (backpackCache.listings || []).length)}.` : 'No provider cache yet.', 'Run Sync Backpack.tf.'),
+      setupStep('backpack_access_token', 'Backpack.tf access token', Boolean(options.backpack_tf_access_token), options.backpack_tf_access_token ? 'Saved in UI credential vault; used for own classifieds/listings.' : 'Needed to read and manage your Backpack.tf account listings.', 'Paste Backpack.tf access token in the Trade Hub UI.'),
+      setupStep('backpack_api_key', 'Backpack.tf API key', Boolean(options.backpack_tf_api_key), options.backpack_tf_api_key ? 'Saved in UI credential vault; used for IGetPrices/v4 price schema.' : 'Needed to load Backpack.tf price schema.', 'Paste Backpack.tf API key in the Trade Hub UI.'),
+      setupStep('provider_listings_cache', 'Backpack account listings', accountListingsReady, backpackCache.ok ? `Account listings ${Number(backpackCache.listings_count || (backpackCache.listings || []).length)}.` : 'No account listings cache yet.', 'Run Sync Backpack.tf.'),
+      setupStep('price_schema_cache', 'Backpack price schema', priceSchemaReady, priceSchemaReady ? `Prices ${pricesCount}.` : `Prices ${pricesCount}; market scanner is blocked until this is ready.`, 'Save Backpack.tf API key and run Sync Backpack.tf.'),
       setupStep('inventory_cache', 'Inventory cache', Boolean(inventory.ok), inventory.ok ? `${Number(inventory.items_count || 0)} items · priced ${Number(inventory.analysis?.priced_items || 0)} · est. ${Number(inventory.analysis?.estimated_value_ref || 0)} ref.` : 'Inventory not synced yet.', 'Run autopilot or Sync inventory.'),
-      setupStep('pricing_core', 'Pricing report', Boolean(pricing.ok || backpackCache.prices_ok), pricing.ok ? `${pricing.summary?.total || 0} offers evaluated.` : (backpackCache.prices_ok ? 'Price schema synced; no offers evaluated yet.' : 'No pricing report yet.'), 'Run trade review.'),
+      setupStep('pricing_core', 'Pricing report', Boolean(pricing.ok || priceSchemaReady), pricing.ok ? `${pricing.summary?.total || 0} offers evaluated.` : (priceSchemaReady ? 'Price schema synced; no offers evaluated yet.' : 'No price schema yet.'), 'Run trade review after price schema is ready.'),
       setupStep('decision_queue', 'Decision queue', Boolean(pricing.ok || state.last_review_at || Array.isArray(decisions.decisions)), Array.isArray(decisions.decisions) ? `${decisions.decisions.length} decisions. Empty is OK when no offers are active.` : 'Idle: no reviewed offers yet.', 'Autopilot or Run trade review will refresh this.'),
       setupStep('sda_bridge', 'SDA Bridge helper', sdaConnected || options.trade_approval_mode === 'manual', sdaConnected ? 'Side helper reachable.' : 'Optional while Trade Hub is in manual mode.', 'Open TF2 SDA Bridge before auto-confirm mode.'),
-      setupStep('planning', 'Planning output', Boolean((plan.ok && Array.isArray(plan.actions)) || pricing.ok || backpackCache.prices_ok), plan.ok ? `${(plan.actions || []).length} listing actions. Empty can be normal.` : 'Planning is idle until offers or scanner targets exist.', 'Let autopilot run or build the market scanner.')
+      setupStep('planning', 'Planning output', Boolean((plan.ok && Array.isArray(plan.actions)) || pricing.ok || priceSchemaReady), plan.ok ? `${(plan.actions || []).length} listing actions. Empty can be normal.` : 'Planning is idle until offers or scanner targets exist.', 'Let autopilot run or build the market scanner after price schema is ready.')
     ];
     const readyCount = steps.filter(x => x.ready).length;
-    const status = { ok: true, version: APP_VERSION, updated_at: new Date().toISOString(), readiness_percent: Math.round((readyCount / steps.length) * 100), ready_count: readyCount, total_steps: steps.length, main_account: accounts.main_account, account_model: { mode: accounts.mode, active_account_id: accounts.active_account_id, main_account_id: accounts.main_account_id, multi_account_enabled: accounts.multi_account_enabled, future_subaccounts_supported: true, subaccounts_prepared: Array.isArray(accounts.subaccounts) ? accounts.subaccounts.length : 0 }, steps, can_run_manual_review: Boolean(options.steam_web_api_key && steamId), can_sync_backpack: Boolean(options.backpack_tf_enabled && (options.backpack_tf_access_token || options.backpack_tf_api_key)), can_build_trading_core: Boolean(options.steam_web_api_key || options.backpack_tf_access_token || options.backpack_tf_api_key || backpackCache.ok || pricing.ok), recommended_next_action: steps.find(x => !x.ready)?.action || 'Ready for guarded trading workflow.' };
+    const status = { ok: true, version: APP_VERSION, updated_at: new Date().toISOString(), readiness_percent: Math.round((readyCount / steps.length) * 100), ready_count: readyCount, total_steps: steps.length, main_account: accounts.main_account, account_model: { mode: accounts.mode, active_account_id: accounts.active_account_id, main_account_id: accounts.main_account_id, multi_account_enabled: accounts.multi_account_enabled, future_subaccounts_supported: true, subaccounts_prepared: Array.isArray(accounts.subaccounts) ? accounts.subaccounts.length : 0 }, steps, can_run_manual_review: Boolean(options.steam_web_api_key && steamId), can_sync_backpack: Boolean(options.backpack_tf_enabled && (options.backpack_tf_access_token || options.backpack_tf_api_key)), can_build_trading_core: Boolean(options.steam_web_api_key || options.backpack_tf_access_token || options.backpack_tf_api_key || backpackCache.ok || pricing.ok), price_schema_ready: priceSchemaReady, backpack_prices_count: pricesCount, recommended_next_action: steps.find(x => !x.ready)?.action || 'Ready for guarded trading workflow.' };
     writeJson(HUB_SETUP_PATH, status);
     return status;
   }
@@ -13236,7 +13257,7 @@ async function handleApi(req, res, pathname) {
   }
   if (pathname === '/api/publish-wizard/prepare-key-to-metal' && (req.method === 'POST' || req.method === 'GET')) return json(res, 200, prepareKeyToMetalDraft(getOptions(), auditService));
   if (pathname === '/api/most-traded/status' || pathname === '/api/offer-booster/status' || pathname === '/api/auto-list-anything/status') return json(res, 200, buildMostTradedAndKeysStatus(getOptions()));
-  // 5.13.40: cached status + lite polling endpoint.  Lite is small and skips
+  // 5.13.41: cached status + lite polling endpoint.  Lite is small and skips
   // every heavy sub-status; it is what the live dashboard polls every few
   // seconds.  The full /status response is served from a short-TTL memory cache
   // (PUBLISH_WIZARD_CACHE_TTL_MS) so opening the panel does not peg CPU.
@@ -13403,5 +13424,5 @@ __server.listen(PORT, HOST, () => {
     runtimeLogger.error('startup', 'vault_loaded_failed', 'Main account vault startup status failed', runtimeErrorContext(error));
   }
   runtimeLogger.info('startup', 'config_loaded', 'Runtime options loaded', runtimeLoggerOptions());
-  console.log('[tf2-hub] 5.13.40 run.sh Hotfix');
+  console.log('[tf2-hub] 5.13.41 Backpack API Key / Price Schema Fix');
 });

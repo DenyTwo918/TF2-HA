@@ -1,6 +1,6 @@
 {
   "name": "tf2-trading-hub-addon",
-  "version": "5.13.40",
+  "version": "5.13.41",
   "private": true,
   "main": "dist/server.js",
   "scripts": {
@@ -8,5 +8,5 @@
     "start": "node dist/server.js"
   },
   "dependencies": {},
-  "description": "TF2 Trading Hub provider readiness health: saved credentials vs Backpack.tf token/API/schema readiness."
+  "description": "TF2 Trading Hub: separate Backpack access token/API key and block false price-schema readiness."
 }
