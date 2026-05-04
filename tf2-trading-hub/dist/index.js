@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const APP_VERSION = '5.13.39';
+const APP_VERSION = '5.13.40';
 const APP_NAME = 'TF2 Trading Hub';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -246,7 +246,7 @@ function writeJson(filePath, value) {
   fs.renameSync(tmp, filePath);
   __notifyWatchers(filePath);
 }
-// 5.13.39: cache invalidation hooks.  When a file the publish wizard reads
+// 5.13.40: cache invalidation hooks.  When a file the publish wizard reads
 // gets rewritten, we drop the cached status so the next request rebuilds.
 const __writeWatchers = new Map();
 function __notifyWatchers(filePath) {
@@ -258,7 +258,7 @@ function watchJsonWrite(filePath, fn) {
   if (!__writeWatchers.has(filePath)) __writeWatchers.set(filePath, new Set());
   __writeWatchers.get(filePath).add(fn);
 }
-// 5.13.39: writes only when the serialized value actually changed.  Uses an
+// 5.13.40: writes only when the serialized value actually changed.  Uses an
 // in-memory hash cache to avoid the round-trip read; falls back to a one-time
 // disk hash when the process restarts.  Eliminates the disk-I/O storm caused by
 // the dashboard re-writing PUBLISH_WIZARD_PATH every 8s with identical data.
@@ -299,7 +299,7 @@ function bool(value, fallback = false) {
   return fallback;
 }
 
-// ── 5.13.39 – Runtime Event Logger ─────────────────────────────────────
+// ── 5.13.40 – Runtime Event Logger ─────────────────────────────────────
 const RUNTIME_LOG_LEVELS = { error: 0, warn: 1, info: 2, debug: 3, audit: 2 };
 const RUNTIME_SECRET_KEY_RE = /(token|secret|password|passwd|cookie|session|authorization|steamloginsecure|shared_secret|identity_secret|refresh|mafile|api[_-]?key|steam_web_api_key|steam_api_key|backpack_tf_access_token|backpack_tf_api_key|access_token|sda_password)/i;
 function runtimeLoggerOptions() {
@@ -764,7 +764,7 @@ function canonicalMainAccountStatusResponse(extra = {}) {
   try { runtimeLogVaultStatus('status_read', response.main_account, { endpoint: 'main-account/status', vault_exists: vaultExists, source }); } catch {}
   return response;
 }
-// ── 5.13.39 – Provider readiness health ───────────────────────────────
+// ── 5.13.40 – Provider readiness health ───────────────────────────────
 function providerHealthText(value, depth = 0, seen = new WeakSet()) {
   try {
     if (value === null || value === undefined) return '';
@@ -1372,7 +1372,7 @@ function getOptions() {
     backpack_tf_enabled: bool(options.backpack_tf_enabled, true),
     backpack_tf_access_token: String(credentialAccount.backpack_tf_access_token || options.backpack_tf_access_token || '').trim(),
     backpack_tf_api_key: String(credentialAccount.backpack_tf_api_key || options.backpack_tf_api_key || '').trim(),
-    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.39').trim(),
+    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.40').trim(),
     backpack_tf_base_url: String(options.backpack_tf_base_url || 'https://backpack.tf').replace(/\/$/, ''),
     backpack_tf_cache_ttl_minutes: clamp(options.backpack_tf_cache_ttl_minutes, 30, 1, 1440),
     backpack_tf_retry_count: clamp(options.backpack_tf_retry_count, 2, 0, 5),
@@ -3045,7 +3045,7 @@ class BackpackTfV2ListingManager {
     return configured.endsWith('/api') ? configured : `${configured}/api`;
   }
   headers(authMode = 'token') {
-    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.39' };
+    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.40' };
     if (authMode === 'token' && this.options.backpack_tf_access_token) headers['X-Auth-Token'] = this.options.backpack_tf_access_token;
     if (authMode === 'bearer' && this.options.backpack_tf_access_token) headers.authorization = `Bearer ${this.options.backpack_tf_access_token}`;
     if (authMode === 'api_key_header' && this.options.backpack_tf_api_key) headers['x-api-key'] = this.options.backpack_tf_api_key;
@@ -4198,7 +4198,7 @@ class DataPersistenceMigrationService {
     return { ok: true, exported_at: new Date().toISOString(), schema_version: DATA_SCHEMA_VERSION, payload };
   }
 }
-// 5.13.39: bounded redactor.  The unbounded version walked the entire market
+// 5.13.40: bounded redactor.  The unbounded version walked the entire market
 // classifieds mirror (1000+ items, deeply nested) on every dashboard poll, which
 // pegged CPU and ballooned RAM on small Home Assistant hosts.  We now cap depth,
 // array length, and key count, returning a placeholder past the limits.  Secret
@@ -4865,7 +4865,7 @@ class HubListingDraftService {
     } catch (err) {
       providerStatus = 'error';
       providerSummary = safeError(err);
-      friendly = String(safeError(err)).includes('apiBase is not a function') ? 'Internal publish executor bug: apiBase helper was not wired. Update to 5.13.39 or newer.' : friendlyPublishError('network_or_timeout', safeError(err));
+      friendly = String(safeError(err)).includes('apiBase is not a function') ? 'Internal publish executor bug: apiBase helper was not wired. Update to 5.13.40 or newer.' : friendlyPublishError('network_or_timeout', safeError(err));
     }
     const syncedProviderPayloadPreview = {
       ...(built.draft.provider_payload_preview || {}),
@@ -6171,7 +6171,7 @@ function buildPublishWizardStatus() {
   return result;
 }
 
-// 5.13.39 – cached + lite publish wizard status.
+// 5.13.40 – cached + lite publish wizard status.
 //
 // The dashboard polls /api/publish-wizard/status every 8s.  The full builder
 // reads ~10 JSON files, runs 12+ status sub-builders, walks each result through
@@ -7609,7 +7609,7 @@ class SteamInventorySyncService {
       let accepted = null;
       let lastFailure = null;
       for (const variant of this.inventoryUrls(options.steam_id64, startAssetId)) {
-        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.39' } });
+        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.40' } });
         const body = result.body || {};
         const parsed = result.ok ? this.extractInventoryPayload(body) : { ok: false, error: result.error || body.error || body.raw || `HTTP ${result.status}` };
         attempts.push({
@@ -13236,7 +13236,7 @@ async function handleApi(req, res, pathname) {
   }
   if (pathname === '/api/publish-wizard/prepare-key-to-metal' && (req.method === 'POST' || req.method === 'GET')) return json(res, 200, prepareKeyToMetalDraft(getOptions(), auditService));
   if (pathname === '/api/most-traded/status' || pathname === '/api/offer-booster/status' || pathname === '/api/auto-list-anything/status') return json(res, 200, buildMostTradedAndKeysStatus(getOptions()));
-  // 5.13.39: cached status + lite polling endpoint.  Lite is small and skips
+  // 5.13.40: cached status + lite polling endpoint.  Lite is small and skips
   // every heavy sub-status; it is what the live dashboard polls every few
   // seconds.  The full /status response is served from a short-TTL memory cache
   // (PUBLISH_WIZARD_CACHE_TTL_MS) so opening the panel does not peg CPU.
@@ -13403,5 +13403,5 @@ __server.listen(PORT, HOST, () => {
     runtimeLogger.error('startup', 'vault_loaded_failed', 'Main account vault startup status failed', runtimeErrorContext(error));
   }
   runtimeLogger.info('startup', 'config_loaded', 'Runtime options loaded', runtimeLoggerOptions());
-  console.log('[tf2-hub] 5.13.39 Schema Validator Fix');
+  console.log('[tf2-hub] 5.13.40 run.sh Hotfix');
 });

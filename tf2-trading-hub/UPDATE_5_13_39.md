@@ -1,4 +1,4 @@
-# TF2 Trading Hub 5.13.39 – Provider Readiness
+# TF2 Trading Hub 5.13.40 – run.sh Hotfix
 
 Adds provider health that separates stored Main account credentials from live Backpack.tf readiness.
 

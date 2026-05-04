@@ -1,8 +1,8 @@
 {
   "ok": true,
-  "version": "5.13.39",
-  "base": "5.13.38 schema-validator-fix",
-  "output": "TF2-HA-5_13_39-provider-readiness-full.zip",
+  "version": "5.13.40",
+  "base": "5.13.40 schema-validator-fix",
+  "output": "TF2-HA-5_13_40-provider-readiness-full.zip",
   "changes": [
     "full repository ZIP, not only a patch script",
     "provider health endpoint /api/main-account/provider-health",
