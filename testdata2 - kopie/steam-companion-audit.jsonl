@@ -1,7 +1,0 @@
-{"ts":"2026-05-03T19:05:28.572Z","app":"tf2-trading-hub","version":"5.13.32","type":"publish_wizard_cache_invalidated","payload":{"reason":"write:steam-companion-backpack-listings.json"}}
-{"ts":"2026-05-03T19:05:28.573Z","app":"tf2-trading-hub","version":"5.13.32","type":"backpack_tf_sync_failed","payload":{"stage":"sync_failed","listings":0,"prices":0,"errors":["fetch failed"]}}
-{"ts":"2026-05-03T19:05:28.676Z","app":"tf2-trading-hub","version":"5.13.32","type":"steam_web_api_missing","payload":{"reason":"review"}}
-{"ts":"2026-05-03T19:05:28.778Z","app":"tf2-trading-hub","version":"5.13.32","type":"trading_core_snapshot_built","payload":{"decisions":0,"accept_recommended":0,"planned_actions":0,"readiness_percent":22}}
-{"ts":"2026-05-03T19:05:28.873Z","app":"tf2-trading-hub","version":"5.13.32","type":"trading_brain_built","payload":{"recommendations":5,"warnings":3,"blocked":1,"source":"scheduled_pipeline"}}
-{"ts":"2026-05-03T19:05:28.882Z","app":"tf2-trading-hub","version":"5.13.32","type":"actionable_trading_plan_built","payload":{"actions":0,"watchlist":0,"protected_items":0,"source":"scheduled_pipeline"}}
-{"ts":"2026-05-03T19:05:28.970Z","app":"tf2-trading-hub","version":"5.13.32","type":"hub_autopilot_pipeline_completed","payload":{"reason":"scheduled_pipeline","stages":8,"ok":true}}
