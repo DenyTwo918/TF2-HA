@@ -1,0 +1,35 @@
+{
+  "ok": true,
+  "version": "5.13.32",
+  "updated_at": "2026-05-03T19:05:28.967Z",
+  "entries": [],
+  "assistant_recommendation_application": {
+    "ok": false,
+    "status": "not_applied"
+  },
+  "safety": {
+    "live_trade_accepts": false,
+    "live_backpack_writes": false,
+    "sda_confirmations": false,
+    "default_queue_only": true
+  },
+  "state_summary": {
+    "ok": true,
+    "version": "5.13.32",
+    "updated_at": "2026-05-03T19:05:28.967Z",
+    "total": 0,
+    "pending": 0,
+    "approved": 0,
+    "cancelled": 0,
+    "done": 0,
+    "disabled": 0,
+    "by_status": {},
+    "safety": {
+      "live_trade_accepts": false,
+      "live_backpack_writes": false,
+      "sda_confirmations": false,
+      "default_queue_only": true
+    },
+    "sample": []
+  }
+}
