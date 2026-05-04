@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const APP_VERSION = '5.13.52';
+const APP_VERSION = '5.13.53';
 const APP_NAME = 'TF2 Trading Hub';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -83,6 +83,7 @@ const CURRENCY_HELPER_PATH = path.join(DATA_DIR, 'tf2-hub-currency-helper.json')
 const AUTO_SELL_RELISTER_PATH = path.join(DATA_DIR, 'tf2-hub-auto-sell-relister.json');
 const MANUAL_OWNED_SELL_DETECTOR_PATH = path.join(DATA_DIR, 'tf2-hub-manual-owned-sell-detector.json');
 const RUNTIME_CONTROLS_PATH = path.join(DATA_DIR, 'tf2-hub-runtime-controls.json');
+const BOT_STATE_PATH = path.join(DATA_DIR, 'tf2-hub-bot-state.json');
 const MAIN_ACCOUNT_SAVE_TRACE_PATH = path.join(DATA_DIR, 'tf2-hub-main-account-save-trace.json');
 const TRADE_GUARD_PATH = path.join(DATA_DIR, 'tf2-hub-trade-guard.json');
 const TRADE_OFFER_STATE_MACHINE_PATH = path.join(DATA_DIR, 'tf2-hub-trade-offer-state-machine.json');
@@ -1661,6 +1662,42 @@ function writeRuntimeControls(update = {}) {
   writeJson(RUNTIME_CONTROLS_PATH, payload);
   return payload;
 }
+function readRawAddonOptions() {
+  try { return readJson(OPTIONS_PATH, {}) || {}; } catch { return {}; }
+}
+function botStatus(extra = {}) {
+  const controls = readRuntimeControls();
+  const rawOptions = readRawAddonOptions();
+  const runtimeHasValue = typeof controls.bot_enabled === 'boolean';
+  const optionHasValue = typeof rawOptions.bot_enabled === 'boolean';
+  const enabled = runtimeHasValue ? Boolean(controls.bot_enabled) : (optionHasValue ? Boolean(rawOptions.bot_enabled) : false);
+  return {
+    ok: true,
+    version: APP_VERSION,
+    enabled,
+    mode: enabled ? 'on' : 'off',
+    source: runtimeHasValue ? 'runtime_controls' : (optionHasValue ? 'addon_options' : 'default_off'),
+    updated_at: controls.bot_updated_at || controls.updated_at || null,
+    message: enabled ? 'Bot ON: guarded automatic mode may run through the operation lock.' : 'Bot OFF: automatic maintainer/publishing is disabled. Manual safe tools remain available in Advanced.',
+    ...extra
+  };
+}
+function runtimeBotEnabled(defaultValue = false) {
+  const status = botStatus();
+  return typeof status.enabled === 'boolean' ? status.enabled : Boolean(defaultValue);
+}
+function setBotEnabled(enabled, source = 'api') {
+  const value = Boolean(enabled);
+  const controls = writeRuntimeControls({ bot_enabled: value, bot_updated_at: new Date().toISOString(), bot_source: source });
+  const status = botStatus({ runtime_controls_saved: true });
+  const eventName = value ? 'bot_enabled' : 'bot_disabled';
+  const payload = { enabled: value, source, mode: status.mode, updated_at: status.updated_at };
+  try { runtimeLogger.info('bot', eventName, value ? 'Bot enabled' : 'Bot disabled', payload); } catch {}
+  try { audit(eventName, payload); } catch {}
+  try { appendActionFeed(eventName, payload); } catch {}
+  try { writeJson(BOT_STATE_PATH, { ok: true, version: APP_VERSION, ...status, runtime_controls: { bot_enabled: controls.bot_enabled, updated_at: controls.updated_at } }); } catch {}
+  return { ok: true, version: APP_VERSION, enabled: value, bot: status, runtime_controls: controls };
+}
 function runtimeMaintainerEnabled(defaultValue = true) {
   const controls = readRuntimeControls();
   return typeof controls.persistent_classifieds_maintainer_enabled === 'boolean' ? controls.persistent_classifieds_maintainer_enabled : Boolean(defaultValue);
@@ -1935,7 +1972,7 @@ function getOptions() {
     backpack_tf_enabled: bool(options.backpack_tf_enabled, true),
     backpack_tf_access_token: String(credentialAccount.backpack_tf_access_token || options.backpack_tf_access_token || '').trim(),
     backpack_tf_api_key: String(credentialAccount.backpack_tf_api_key || options.backpack_tf_api_key || '').trim(),
-    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.52').trim(),
+    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.53').trim(),
     backpack_tf_base_url: String(options.backpack_tf_base_url || 'https://backpack.tf').replace(/\/$/, ''),
     backpack_tf_cache_ttl_minutes: clamp(options.backpack_tf_cache_ttl_minutes, 30, 1, 1440),
     backpack_tf_retry_count: clamp(options.backpack_tf_retry_count, 2, 0, 5),
@@ -1954,6 +1991,7 @@ function getOptions() {
     startup_rebuild_batch_size: clamp(options.startup_rebuild_batch_size, 20, 1, 120),
     startup_rebuild_normal_batch_size: clamp(options.startup_rebuild_normal_batch_size, 20, 1, 120),
     startup_rebuild_max_runs: clamp(options.startup_rebuild_max_runs, 3, 1, 20),
+    bot_enabled: runtimeBotEnabled(bool(options.bot_enabled, false)),
     persistent_classifieds_maintainer_enabled: runtimeMaintainerEnabled(bool(options.persistent_classifieds_maintainer_enabled, true)),
     persistent_classifieds_interval_minutes: clamp(options.persistent_classifieds_interval_minutes, 5, 1, 1440),
     persistent_classifieds_max_publishes_per_cycle: clamp(options.persistent_classifieds_max_publishes_per_cycle, 80, 1, 120),
@@ -3608,7 +3646,7 @@ class BackpackTfV2ListingManager {
     return configured.endsWith('/api') ? configured : `${configured}/api`;
   }
   headers(authMode = 'token') {
-    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.52' };
+    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.53' };
     if (authMode === 'token' && this.options.backpack_tf_access_token) headers['X-Auth-Token'] = this.options.backpack_tf_access_token;
     if (authMode === 'bearer' && this.options.backpack_tf_access_token) headers.authorization = `Bearer ${this.options.backpack_tf_access_token}`;
     if (authMode === 'api_key_header' && this.options.backpack_tf_api_key) headers['x-api-key'] = this.options.backpack_tf_api_key;
@@ -6728,7 +6766,7 @@ function buildTradingBrainV513Status(options = getOptions()) {
       bad_key_roundups: badKeyRoundups.slice(0, samplesLimit),
       stock_capped: (stock.capped_samples || []).slice(0, samplesLimit)
     },
-    next_action: issues.length ? 'Review Trading Brain issues, then run Maintain now. Do not add more features until these counters are clean.' : 'Trading Brain baseline is aligned. Maintain now can keep buy/sell listings moving under the central rules.'
+    next_action: issues.length ? 'Review Trading Brain issues before turning the Bot ON. Do not add more features until these counters are clean.' : 'Trading Brain baseline is aligned. Bot ON can keep guarded buy/sell listings moving under the central rules.'
   };
   try { writeJson(TRADING_BRAIN_V513_PATH, status); } catch {}
   return status;
@@ -6837,8 +6875,33 @@ function buildPublishWizardStatus() {
   try { staleSellGuardStatus = buildStaleSellListingGuardStatus(options); } catch (error) { staleSellGuardStatus = { ok: false, version: APP_VERSION, code: 'stale_sell_guard_error', error: safeError(error) }; }
   const startupArchive = new StartupListingArchiveService(auditService).current();
   const startupRebuild = new StartupRebuildControllerService(auditService).current();
+  const bot = botStatus();
+  let mainAccountStatus = { ok: false, readiness: 'unknown', needs_setup: true };
+  try { const acct = new HubCredentialVaultService(auditService).status(); mainAccountStatus = (acct && acct.main_account) || acct || mainAccountStatus; } catch (error) { mainAccountStatus = { ok: false, readiness: 'error', error: safeError(error) }; }
+  const invCache = readJson(HUB_INVENTORY_PATH, { ok: false, items: [], analysis: {} });
+  const invAnalysis = invCache.analysis || {};
+  const inventorySummary = {
+    ok: invCache.ok !== false,
+    items: Number(invCache.items_count || (Array.isArray(invCache.items) ? invCache.items.length : 0) || 0),
+    priced: Number(invCache.priced_items || invAnalysis.priced_items || 0),
+    unpriced: Number(invCache.unpriced_items || invAnalysis.unpriced_items || 0),
+    estimated_value_ref: Number(invCache.estimatedValueRef || invCache.estimated_value_ref || invAnalysis.estimated_value_ref || 0),
+    updated_at: invCache.updated_at || invCache.synced_at || null
+  };
+  const providerCache = readJson(BACKPACK_LISTINGS_PATH, { ok: false, listings: [], listings_count: 0, prices_count: 0 });
+  const priceSchema = readJson(BACKPACK_PRICE_SCHEMA_PATH, { ok: false, prices: [] });
+  const backpackSummary = {
+    ok: providerCache.ok !== false,
+    listings: Number(providerCache.listings_count || (Array.isArray(providerCache.listings) ? providerCache.listings.length : 0) || 0),
+    prices: Number(providerCache.prices_count || (Array.isArray(priceSchema.prices) ? priceSchema.prices.length : 0) || 0),
+    token_saved: Boolean(options.backpack_tf_access_token),
+    api_key_saved: Boolean(options.backpack_tf_api_key),
+    write_mode: options.backpack_tf_write_mode,
+    live_writes_enabled: Boolean(options.allow_live_classifieds_writes),
+    updated_at: providerCache.updated_at || null
+  };
   const statusWarnings = [testPayload, duplicateGuard, maintainerStatus, autoSellStatus, tradeGuard, tradeMachine].filter(x => x && x.ok === false && x.error).map(x => x.error).slice(0, 8);
-  const result = { ok: true, version: APP_VERSION, updated_at: new Date().toISOString(), ready_to_test_payload: Boolean(testPayload && testPayload.ok), ready_to_publish_guarded: steps.every(step => step.ok) && guardedReady, guarded_publish_enabled: Boolean(options.allow_guarded_backpack_publish), live_classifieds_writes_enabled: Boolean(options.allow_live_classifieds_writes), backpack_tf_write_mode: options.backpack_tf_write_mode, candidate_draft_id: candidate?.draft_id || null, candidate_item_name: candidate?.item_name || null, actionable_candidate_summary: actionableSelection || null, steps, duplicate_guard: duplicateGuard, currency_guard: currencyGuard, market_classifieds_mirror: redactDeep(marketMirror), most_traded_and_keys: redactDeep(buildMostTradedAndKeysStatus(options)), startup_listing_archive: redactDeep(startupArchive), startup_rebuild: redactDeep(startupRebuild), classifieds_maintainer: redactDeep(maintainerStatus), auto_sell_relister: redactDeep(autoSellStatus), manual_owned_sell_detector: redactDeep(manualOwnedSellStatus), sell_booster: redactDeep(sellBooster), trade_guard: redactDeep(tradeGuard), trade_counteroffers: redactDeep(tradeCounteroffers), trade_offer_state_machine: redactDeep(tradeMachine), trading_brain_v513: redactDeep(tradingBrainV513), market_pricing_pipeline: redactDeep(marketPricingPipeline), fallback_metrics: redactDeep(fallbackMetricsStatus), stale_sell_listing_guard: redactDeep(staleSellGuardStatus), liquidity_first: redactDeep(buildLiquidityFirstStatus(options)), publish_error_inspector: redactDeep(buildPublishErrorInspectorStatus(options)), adaptive_fill_controller: redactDeep(buildAdaptiveFillControllerStatus(options)), listing_text_sync: { ok: true, enabled: Boolean(options.listing_text_sync_with_published_price), force_rebuild_on_publish: Boolean(options.listing_text_force_rebuild_on_publish), sync_existing_drafts: Boolean(options.listing_text_sync_existing_drafts), source: 'final_published_currencies' }, status_warnings: statusWarnings, payload_test: testPayload ? redactDeep(testPayload) : null, publish_verification: publishVerification, publish_disabled_reason: publishDisabledReason, next_action: autoSellStatus.last_result?.counters?.published_sell_listings ? 'Bought item detected and sell listing published. Monitor Backpack.tf listing status.' : (currencyGuard?.can_prepare_key_to_metal_listing ? 'The wizard will auto-publish a key→metal listing first, then you manually handle the Steam offer and retry the buy listing.' : (publishVerification.listed ? 'Listing verified on Backpack.tf. Stop here or monitor it.' : (blockingStep ? blockingStep.label : 'Publish one approved draft manually, then click Verify listing.'))) };
+  const result = { ok: true, version: APP_VERSION, bot, bot_enabled: bot.enabled, main_account: redactDeep(mainAccountStatus), inventory_summary: inventorySummary, backpack_summary: backpackSummary, updated_at: new Date().toISOString(), ready_to_test_payload: Boolean(testPayload && testPayload.ok), ready_to_publish_guarded: steps.every(step => step.ok) && guardedReady, guarded_publish_enabled: Boolean(options.allow_guarded_backpack_publish), live_classifieds_writes_enabled: Boolean(options.allow_live_classifieds_writes), backpack_tf_write_mode: options.backpack_tf_write_mode, candidate_draft_id: candidate?.draft_id || null, candidate_item_name: candidate?.item_name || null, actionable_candidate_summary: actionableSelection || null, steps, duplicate_guard: duplicateGuard, currency_guard: currencyGuard, market_classifieds_mirror: redactDeep(marketMirror), most_traded_and_keys: redactDeep(buildMostTradedAndKeysStatus(options)), startup_listing_archive: redactDeep(startupArchive), startup_rebuild: redactDeep(startupRebuild), classifieds_maintainer: redactDeep(maintainerStatus), auto_sell_relister: redactDeep(autoSellStatus), manual_owned_sell_detector: redactDeep(manualOwnedSellStatus), sell_booster: redactDeep(sellBooster), trade_guard: redactDeep(tradeGuard), trade_counteroffers: redactDeep(tradeCounteroffers), trade_offer_state_machine: redactDeep(tradeMachine), trading_brain_v513: redactDeep(tradingBrainV513), market_pricing_pipeline: redactDeep(marketPricingPipeline), fallback_metrics: redactDeep(fallbackMetricsStatus), stale_sell_listing_guard: redactDeep(staleSellGuardStatus), liquidity_first: redactDeep(buildLiquidityFirstStatus(options)), publish_error_inspector: redactDeep(buildPublishErrorInspectorStatus(options)), adaptive_fill_controller: redactDeep(buildAdaptiveFillControllerStatus(options)), listing_text_sync: { ok: true, enabled: Boolean(options.listing_text_sync_with_published_price), force_rebuild_on_publish: Boolean(options.listing_text_force_rebuild_on_publish), sync_existing_drafts: Boolean(options.listing_text_sync_existing_drafts), source: 'final_published_currencies' }, status_warnings: statusWarnings, payload_test: testPayload ? redactDeep(testPayload) : null, publish_verification: publishVerification, publish_disabled_reason: publishDisabledReason, next_action: autoSellStatus.last_result?.counters?.published_sell_listings ? 'Bought item detected and sell listing published. Monitor Backpack.tf listing status.' : (currencyGuard?.can_prepare_key_to_metal_listing ? 'The wizard will auto-publish a key→metal listing first, then you manually handle the Steam offer and retry the buy listing.' : (publishVerification.listed ? 'Listing verified on Backpack.tf. Stop here or monitor it.' : (blockingStep ? blockingStep.label : 'Publish one approved draft manually, then click Verify listing.'))) };
   writeJsonIfChanged(PUBLISH_WIZARD_PATH, result);
   return result;
 }
@@ -6880,6 +6943,34 @@ function getCachedPublishWizardStatus() {
   __publishWizardCache.builtAt = Date.now();
   return result;
 }
+function buildMinimalProductionDashboardSnapshot(options = getOptions()) {
+  let mainAccountStatus = { ok: false, readiness: 'unknown', needs_setup: true };
+  try { const acct = new HubCredentialVaultService(auditService).status(); mainAccountStatus = (acct && acct.main_account) || acct || mainAccountStatus; } catch (error) { mainAccountStatus = { ok: false, readiness: 'error', error: safeError(error) }; }
+  const invCache = readJson(HUB_INVENTORY_PATH, { ok: false, items: [], analysis: {} });
+  const invAnalysis = invCache.analysis || {};
+  const inventorySummary = {
+    ok: invCache.ok !== false,
+    items: Number(invCache.items_count || (Array.isArray(invCache.items) ? invCache.items.length : 0) || 0),
+    priced: Number(invCache.priced_items || invAnalysis.priced_items || 0),
+    unpriced: Number(invCache.unpriced_items || invAnalysis.unpriced_items || 0),
+    estimated_value_ref: Number(invCache.estimatedValueRef || invCache.estimated_value_ref || invAnalysis.estimated_value_ref || 0),
+    updated_at: invCache.updated_at || invCache.synced_at || null
+  };
+  const providerCache = readJson(BACKPACK_LISTINGS_PATH, { ok: false, listings: [], listings_count: 0, prices_count: 0 });
+  const priceSchema = readJson(BACKPACK_PRICE_SCHEMA_PATH, { ok: false, prices: [] });
+  const backpackSummary = {
+    ok: providerCache.ok !== false,
+    listings: Number(providerCache.listings_count || (Array.isArray(providerCache.listings) ? providerCache.listings.length : 0) || 0),
+    prices: Number(providerCache.prices_count || (Array.isArray(priceSchema.prices) ? priceSchema.prices.length : 0) || 0),
+    token_saved: Boolean(options.backpack_tf_access_token),
+    api_key_saved: Boolean(options.backpack_tf_api_key),
+    write_mode: options.backpack_tf_write_mode,
+    live_writes_enabled: Boolean(options.allow_live_classifieds_writes),
+    updated_at: providerCache.updated_at || null
+  };
+  return { bot: botStatus(), bot_enabled: botStatus().enabled, main_account: redactDeep(mainAccountStatus), inventory_summary: inventorySummary, backpack_summary: backpackSummary, operation: operationPublicSnapshot(), active_operation: operationPublicSnapshot() };
+}
+
 function buildPublishWizardLiteStatus() {
   const options = getOptions();
   const queue = readJson(PLANNING_QUEUE_PATH, { ok: true, items: [] });
@@ -6897,6 +6988,10 @@ function buildPublishWizardLiteStatus() {
     version: APP_VERSION,
     updated_at: new Date().toISOString(),
     lite: true,
+    bot: botStatus(),
+    bot_enabled: botStatus().enabled,
+    operation: operationPublicSnapshot(),
+    active_operation: operationPublicSnapshot(),
     cache_age_ms: cachedFull ? Date.now() - __publishWizardCache.builtAt : null,
     planning_queue: { count: planningCount, approved: planningApproved },
     drafts: { count: draftList.length, approved: approvedDrafts.length },
@@ -8281,7 +8376,7 @@ class SteamInventorySyncService {
       let accepted = null;
       let lastFailure = null;
       for (const variant of this.inventoryUrls(options.steam_id64, startAssetId)) {
-        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.52' } });
+        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.53' } });
         const body = result.body || {};
         const parsed = result.ok ? this.extractInventoryPayload(body) : { ok: false, error: result.error || body.error || body.raw || `HTTP ${result.status}` };
         attempts.push({
@@ -13191,7 +13286,9 @@ async function handleApi(req, res, pathname) {
       ok: true,
       app: APP_NAME,
       version: APP_VERSION,
-      scope: '5.13.50 – Hard Operation Watchdog + Stale Lock Release',
+      bot: botStatus(),
+      bot_enabled: botStatus().enabled,
+      scope: '5.13.53 – Minimal Bot ON/OFF + Maintainer Quarantine',
       mode: 'operations_cockpit_notifications_persistence_listing_engine_targeted_orders_multi_account_strategy_ollama',
       steam_web_api_key_saved: Boolean(options.steam_web_api_key),
       steam_web_api_key: redacted(options.steam_web_api_key),
@@ -13226,6 +13323,17 @@ async function handleApi(req, res, pathname) {
     });
   }
   if (pathname === '/api/version-audit') return json(res, 200, buildVersionAudit());
+  if (pathname === '/api/bot/status') return json(res, 200, botStatus({ operation: operationPublicSnapshot(), active_operation: operationPublicSnapshot() }));
+  if (pathname === '/api/bot/toggle' && (req.method === 'POST' || req.method === 'GET')) {
+    const raw = req.method === 'POST' ? await readBody(req) : '';
+    let parsed = {};
+    try { parsed = raw ? JSON.parse(raw) : {}; } catch { parsed = {}; }
+    const queryEnabled = /enabled=true/.test(String(req.url || '')) ? true : (/enabled=false/.test(String(req.url || '')) ? false : undefined);
+    const current = botStatus();
+    const enabled = typeof parsed.enabled === 'boolean' ? parsed.enabled : (typeof queryEnabled === 'boolean' ? queryEnabled : !current.enabled);
+    const result = setBotEnabled(enabled, 'api_toggle');
+    return json(res, 200, { ...result, operation: operationPublicSnapshot(), active_operation: operationPublicSnapshot() });
+  }
   if (pathname === '/api/system/runtime-status') return json(res, 200, buildRuntimeSchedulerStatus());
   if (pathname === '/api/system/crash-watchdog-status') return json(res, 200, buildCrashWatchdogStatus());
   if (pathname === '/api/diagnostics/bundle') {
@@ -14024,7 +14132,7 @@ async function handleApi(req, res, pathname) {
     if (cached) {
       return json(res, 200, { ...cached, cached: true, cache_age_ms: Date.now() - __publishWizardCache.builtAt, maintainer_running: __maintainerRunning, operation: operationPublicSnapshot(), active_operation: operationPublicSnapshot() });
     }
-    return json(res, 200, { ok: true, version: APP_VERSION, updated_at: new Date().toISOString(), cached: false, maintainer_running: __maintainerRunning, operation: operationPublicSnapshot(), active_operation: operationPublicSnapshot(), steps: [], guarded_publish_enabled: Boolean(options.allow_guarded_backpack_publish), live_classifieds_writes_enabled: Boolean(options.allow_live_classifieds_writes), backpack_tf_write_mode: options.backpack_tf_write_mode, publish_disabled_reason: 'Dashboard status not built yet. Click Rebuild to load.', classifieds_maintainer: { ok: true, running: __maintainerRunning, enabled: classifiedsMaintainer.enabled(options), note: 'pre_build_lite' }, auto_sell_relister: { ok: true, note: 'pre_build_lite' }, trade_offer_state_machine: { ok: true, counts: {}, states: [], next_action: 'Status will be available after first rebuild.' } });
+    return json(res, 200, { ok: true, version: APP_VERSION, updated_at: new Date().toISOString(), cached: false, maintainer_running: __maintainerRunning, ...buildMinimalProductionDashboardSnapshot(options), steps: [], guarded_publish_enabled: Boolean(options.allow_guarded_backpack_publish), live_classifieds_writes_enabled: Boolean(options.allow_live_classifieds_writes), backpack_tf_write_mode: options.backpack_tf_write_mode, publish_disabled_reason: 'Minimal Bot dashboard is ready. Advanced publish wizard has not been rebuilt yet.', classifieds_maintainer: { ok: true, running: __maintainerRunning, enabled: classifiedsMaintainer.enabled(options), note: 'pre_build_lite' }, auto_sell_relister: { ok: true, note: 'pre_build_lite' }, trade_offer_state_machine: { ok: true, counts: {}, states: [], next_action: 'Status will be available after first rebuild.' } });
   }
   if (pathname === '/api/publish-wizard/rebuild' && (req.method === 'POST' || req.method === 'GET')) {
     // 5.13.50: Heavy rebuild is single-flight and never overlaps provider/maintainer.
@@ -14101,6 +14209,14 @@ async function handleApi(req, res, pathname) {
     // immediate accepted status.  The live dashboard poll then reads the run
     // result from /api/classifieds-maintainer/status.
     try { releaseStaleOperationIfNeeded('maintainer_start'); } catch {}
+    const bot = botStatus();
+    if (!bot.enabled) {
+      const payload = { ok: true, version: APP_VERSION, skipped: true, bot_off: true, accepted_async: false, message: 'Bot is OFF. Maintainer was not started.', bot, operation: operationPublicSnapshot() };
+      try { runtimeLogger.info('maintainer', 'maintainer_auto_run_disabled', 'Maintainer skipped because Bot is OFF', { source: 'manual_ui_async' }); } catch {}
+      try { audit('maintainer_auto_run_disabled', { source: 'manual_ui_async', bot_enabled: false }); } catch {}
+      try { appendActionFeed('maintainer_auto_run_disabled', { source: 'manual_ui_async', bot_enabled: false }); } catch {}
+      return json(res, 202, payload);
+    }
     if (__maintainerRunning || operationRuntimeBusy()) {
       const busy = operationBusyPayload('classifieds_maintainer', 'manual_ui_async');
       runtimeLogger.info('maintainer', 'maintainer_skipped_busy', 'Maintainer skipped: operation already running', { activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs });
@@ -14214,6 +14330,11 @@ async function runMaintainerIsolated(reason = 'scheduled_classifieds_maintainer'
     runtimeLogger.error('maintainer', isTimeout ? 'maintainer_timeout' : 'maintainer_failed', isTimeout ? 'Maintainer timed out after 90s' : 'Maintainer failed with error', { reason, elapsed_ms: elapsed, error: errSafe, timed_out: isTimeout });
     audit(isTimeout ? 'maintainer_timeout' : 'maintainer_failed', { reason, elapsed_ms: elapsed, error: errSafe });
     appendActionFeed(isTimeout ? 'maintainer_timeout' : 'maintainer_failed', { reason, elapsed_ms: elapsed, error: errSafe });
+    if (!isTimeout) {
+      try { runtimeLogger.warn('maintainer', 'maintainer_failed_safe', 'Maintainer failed safely; add-on stays running', { reason, elapsed_ms: elapsed, error: errSafe }); } catch {}
+      try { audit('maintainer_failed_safe', { reason, elapsed_ms: elapsed, error: errSafe }); } catch {}
+      try { appendActionFeed('maintainer_failed_safe', { reason, elapsed_ms: elapsed, error: errSafe }); } catch {}
+    }
     if (isTimeout) {
       __lastMaintainerTimeoutAt = Date.now();
       try { audit('maintainer_timeout_released_lock', { reason, elapsed_ms: elapsed, error: errSafe, owningOperationId }); } catch {}
@@ -14258,7 +14379,24 @@ function startScheduler() {
       try {
         // 5.13.50: preflight watchdog — release stale locks before scheduling any job.
         try { releaseStaleOperationIfNeeded('scheduler_preflight'); } catch {}
+        const bot = botStatus();
         let heavyJobRanThisTick = false;
+        if (!bot.enabled) {
+          if (hubAutopilot.due()) {
+            const payload = { job: 'scheduled_pipeline', bot_enabled: false, mode: bot.mode };
+            runtimeLogger.info('scheduler', 'bot_disabled', 'Bot OFF: scheduled pipeline skipped', payload);
+            try { audit('bot_disabled', payload); } catch {}
+            try { appendActionFeed('bot_disabled', payload); } catch {}
+          }
+          if (classifiedsMaintainer.due()) {
+            const payload = { job: 'scheduled_classifieds_maintainer', bot_enabled: false, mode: bot.mode };
+            runtimeLogger.info('scheduler', 'maintainer_auto_run_disabled', 'Bot OFF: scheduled maintainer skipped', payload);
+            try { audit('maintainer_auto_run_disabled', payload); } catch {}
+            try { appendActionFeed('maintainer_auto_run_disabled', payload); } catch {}
+          }
+          runtimeLogger.info('scheduler', 'scheduler_tick_completed', 'Scheduler tick completed', { elapsed_ms: Date.now() - tickStart, heavy_job_ran: false, bot_enabled: false });
+          return;
+        }
         if (hubAutopilot.due()) {
           if (operationRuntimeBusy()) { schedulerBusySkip('scheduled_pipeline'); }
           else {
@@ -14275,10 +14413,10 @@ function startScheduler() {
         }
         // 5.13.50: second preflight — in case scheduled_pipeline just released the lock via timeout.
         try { releaseStaleOperationIfNeeded('scheduler_preflight_post_pipeline'); } catch {}
-        // 5.13.52: Auto maintainer is disabled by default. Requires explicit opt-in.
+        // 5.13.53: Auto maintainer is disabled by default. Requires explicit opt-in.
         const maintainerAutoRunEnabled = options.persistent_classifieds_maintainer_auto_run_enabled === true;
         if (classifiedsMaintainer.due() && !maintainerAutoRunEnabled) {
-          runtimeLogger.info('scheduler', 'maintainer_auto_run_disabled', 'Auto maintainer skipped: persistent_classifieds_maintainer_auto_run_enabled is not true. Use Maintain now manually.', {});
+          runtimeLogger.info('scheduler', 'maintainer_auto_run_disabled', 'Auto maintainer skipped: bot/auto maintainer is not enabled.', {});
         } else if (classifiedsMaintainer.due()) {
           if (__lastMaintainerTimeoutAt && Date.now() - __lastMaintainerTimeoutAt < 600000) {
             const cooldownMs = Date.now() - __lastMaintainerTimeoutAt;
@@ -14333,5 +14471,5 @@ __server.listen(PORT, HOST, () => {
     runtimeLogger.error('startup', 'vault_loaded_failed', 'Main account vault startup status failed', runtimeErrorContext(error));
   }
   runtimeLogger.info('startup', 'config_loaded', 'Runtime options loaded', runtimeLoggerOptions());
-  console.log(`[tf2-hub] ${APP_VERSION} Hard operation watchdog + stale lock release + elapsed fix`);
+  console.log(`[tf2-hub] ${APP_VERSION} Minimal Bot ON/OFF dashboard + maintainer quarantine`);
 });

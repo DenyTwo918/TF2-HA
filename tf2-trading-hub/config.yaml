@@ -1,7 +1,7 @@
 slug: tf2_trading_hub
 name: TF2 Trading Hub
-version: "5.13.52"
-description: Auto classifieds maintainer disabled by default; UI version sync; extended version-audit; manual Maintain now stays functional.
+version: "5.13.53"
+description: Minimal Bot ON/OFF dashboard; automatic maintainer/publishing defaults OFF; guarded safety preserved.
 url: https://github.com/DenyTwo918/TF2-HA
 arch:
 - amd64
@@ -46,7 +46,7 @@ options:
   max_offer_value_ref: 100
   do_not_trade_tags: scam,blocked,do_not_trade
   backpack_tf_enabled: true
-  backpack_tf_user_agent: TF2-HA-TF2-Trading-Hub/5.13.52
+  backpack_tf_user_agent: TF2-HA-TF2-Trading-Hub/5.13.53
   backpack_tf_base_url: https://backpack.tf
   backpack_tf_cache_ttl_minutes: 30
   backpack_tf_retry_count: 2
@@ -68,6 +68,7 @@ options:
   publish_duplicate_guard_enabled: true
   allow_duplicate_guard_override: false
   guarded_publish_cooldown_seconds: 30
+  bot_enabled: false
   persistent_classifieds_maintainer_enabled: true
   persistent_classifieds_maintainer_auto_run_enabled: false
   persistent_classifieds_interval_minutes: 5
@@ -400,6 +401,7 @@ schema:
   publish_duplicate_guard_enabled: bool
   allow_duplicate_guard_override: bool
   guarded_publish_cooldown_seconds: int(0,3600)
+  bot_enabled: bool
   persistent_classifieds_maintainer_enabled: bool
   persistent_classifieds_maintainer_auto_run_enabled: bool
   persistent_classifieds_interval_minutes: int(1,1440)

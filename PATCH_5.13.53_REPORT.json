@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "version": "5.13.53",
+  "title": "Minimal Bot ON/OFF UI + Maintainer Quarantine",
+  "changed": [
+    "Bot runtime state and endpoints",
+    "Scheduler bot-off skip",
+    "Maintainer run guard when Bot OFF",
+    "Minimal production UI",
+    "Version markers bumped"
+  ]
+}

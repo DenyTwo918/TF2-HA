@@ -10,9 +10,9 @@
   <main class="shell">
     <section class="hero hubHero">
       <div>
-        <p class="eyebrow">Home Assistant add-on · 5.13.52 · Disable Auto Maintainer + UI Version Sync</p>
+        <p class="eyebrow">Home Assistant add-on · 5.13.53 · Minimal Bot ON/OFF</p>
         <h1>TF2 Trading Hub</h1>
-        <p class="lead">Auto classifieds maintainer disabled by default for safety; independent watchdog active; version markers unified.</p><div class="buildBanner"><b>Build 5.13.52 loaded</b><span>Set persistent_classifieds_maintainer_auto_run_enabled=true to re-enable automatic maintainer cycles.</span></div>
+        <p class="lead">Minimal dashboard: one Bot ON/OFF control; maintainer complexity hidden from the main UI.</p><div class="buildBanner"><b>Build 5.13.53 loaded</b><span>Bot defaults to OFF. Turn ON only when you want guarded automatic mode.</span></div>
         <div class="heroActions diagnosticFirstActions">
           <button id="runDiagnosticBundle" class="primary">Diagnostic bundle for assistant</button>
           <button id="refreshAll">Refresh cockpit</button><button id="toggleSimpleUi">Show advanced UI</button>
@@ -150,10 +150,10 @@
 
     <section class="card sdaSidekick"><div class="cardHead split"><div><p class="eyebrow">Side helper only</p><h2>SDA Bridge integration</h2></div><div class="buttonRow"><button id="checkSdaBridge">Check SDA Bridge</button><button id="loadSdaConfirmations">Load confirmations</button><button id="confirmAcceptRecommendedSda" class="primary">Confirm recommended trades</button></div></div><p class="muted">The hub only asks SDA Bridge to confirm known trade offer IDs. Login/account/market confirmations are not handled by Trade Hub.</p><div id="sdaDetails" class="metrics muted">Check SDA Bridge first.</div><details class="softDetails"><summary>SDA output</summary><pre id="sdaOutput"></pre></details></section>
 
-    <section class="grid two"><article class="card"><div class="cardHead split"><h2>Action Feed</h2><button id="refreshFeed">Refresh</button></div><div id="actionFeed" class="feed">No feed yet.</div></article><article class="card"><div class="cardHead split"><h2>Logs</h2><div class="buttonRow"><button id="loadPlan">Load listing plan</button><button id="loadAcceptLog">Accept log</button><button id="loadAudit">Audit</button></div></div><pre id="logs"></pre></article></section>
+    <section class="grid two advancedSection"><article class="card"><div class="cardHead split"><h2>Action Feed</h2><button id="refreshFeed">Refresh</button></div><div id="actionFeed" class="feed">No feed yet.</div></article><article class="card"><div class="cardHead split"><h2>Logs</h2><div class="buttonRow"><button id="loadPlan">Load listing plan</button><button id="loadAcceptLog">Accept log</button><button id="loadAudit">Audit</button></div></div><pre id="logs"></pre></article></section>
 
     <!-- 5.13.44 – Local Workflow + Release Check -->
-    <section class="grid two workflowGrid">
+    <section class="grid two workflowGrid advancedSection">
       <article class="card">
         <div class="cardHead split"><div><p class="eyebrow">5.13.44</p><h2>Local Workflow</h2></div><div class="buttonRow"><button id="runLocalWorkflow" class="primary">▶ Run Local Workflow</button></div></div>
         <p class="muted">Runs: provider sync → inventory sync → market scanner → planning queue → listing drafts → diagnostic triage.</p>
@@ -169,9 +169,9 @@
     <section class="card productionDashboardSection">
       <div class="cardHead split">
         <div><p class="eyebrow">Production</p><h2>Trading dashboard</h2></div>
-        <div class="buttonRow"><button id="prodRunLocalWorkflowTop">Run workflow</button><button id="prodRunMaintainerNowTop" class="primary">Maintain now</button><button id="refreshPublishWizardTop">Refresh</button></div>
+        <div class="buttonRow"><button id="refreshPublishWizardTop">Refresh</button></div>
       </div>
-      <p class="muted">Main view shows only the live loop: account readiness, maintainer state, active listings, bought-item auto-sell and recent problems. Manual test tools are hidden in Advanced.</p>
+      <p class="muted">Main view is intentionally minimal: one Bot ON/OFF control, account/provider readiness and the last operation. Extra tools stay hidden in Advanced.</p>
       <div id="liveDashboardStatus" class="liveDashboardStatus">Live dashboard waiting for first update…</div>
       <div id="publishWizard">Loading production dashboard…</div>
     </section>
@@ -182,14 +182,14 @@
     </section>
 
     <!-- 5.12.34 – Planning Queue -->
-    <section class="card planningQueueSection">
+    <section class="card planningQueueSection advancedSection">
       <div class="cardHead split"><div><p class="eyebrow">Step 1: Scan → Approve</p><h2>Planning Queue</h2></div></div>
       <p class="muted">Items come from the market scanner. Approve locally, then build listing drafts below.</p>
       <div id="planningQueue">No planning queue yet. Run Local Workflow.</div>
     </section>
 
     <!-- 5.13.44 – Hub Listing Drafts + Guarded Publish Executor -->
-    <section class="card listingDraftsSection">
+    <section class="card listingDraftsSection advancedSection">
       <div class="cardHead split"><div><p class="eyebrow">Step 2: Draft → Publish</p><h2>Listing Drafts</h2></div></div>
       <p class="muted">Build drafts from approved items. Test the redacted publish payload first, then optionally publish exactly one approved draft to Backpack.tf (requires <code>allow_guarded_backpack_publish: true</code> in add-on options).</p>
       <div id="hubListingDrafts">No listing drafts yet. Approve queue items then build drafts.</div>
