@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
 set -eu
-printf '%s\n' "[tf2-hub] version: 5.13.55"
-printf '%s\n' "[tf2-hub] Price schema memory cache + cached maintainer sync to reduce CPU spikes"
+echo "[tf2-hub] version: 5.13.56"
+echo "[tf2-hub] Safe Minimal Maintainer after provider sync"
 exec node /app/dist/server.js

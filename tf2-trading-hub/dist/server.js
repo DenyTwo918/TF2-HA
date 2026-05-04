@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const APP_VERSION = '5.13.55';
+const APP_VERSION = '5.13.56';
 const APP_NAME = 'TF2 Trading Hub';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -22,7 +22,7 @@ const PROVIDER_STATE_PATH = path.join(DATA_DIR, 'steam-companion-provider-state.
 const BACKPACK_LISTINGS_PATH = path.join(DATA_DIR, 'steam-companion-backpack-listings.json');
 const BACKPACK_PRICE_SCHEMA_PATH = path.join(DATA_DIR, 'tf2-hub-backpack-price-schema.json');
 const BACKPACK_PRICE_SCHEMA_DEBUG_PATH = path.join(DATA_DIR, 'tf2-hub-backpack-price-schema-debug.json');
-// 5.13.55: in-memory price schema cache – parse once, serve from memory, avoid repeated blocking JSON.parse of 45k+ entries
+// 5.13.56: in-memory price schema cache – parse once, serve from memory, avoid repeated blocking JSON.parse of 45k+ entries
 let __priceSchemaCache = null;
 let __priceSchemaCacheTTL = 0;
 const STEAM_ITEM_SCHEMA_PATH = path.join(DATA_DIR, 'tf2-hub-steam-item-schema.json');
@@ -299,7 +299,7 @@ function writeJsonIfChanged(filePath, value) {
   __notifyWatchers(filePath);
   return true;
 }
-// 5.13.55: price schema memory cache helpers – prevents repeated blocking JSON.parse of 45k+ entries
+// 5.13.56: price schema memory cache helpers – prevents repeated blocking JSON.parse of 45k+ entries
 function readPriceSchemaJson(defaultVal = { ok: false, prices: [] }) {
   if (__priceSchemaCache && Date.now() < __priceSchemaCacheTTL) return __priceSchemaCache;
   const data = readJson(BACKPACK_PRICE_SCHEMA_PATH, defaultVal);
@@ -441,7 +441,7 @@ function runtimeLogVaultStatus(action, status = {}, extra = {}) {
 }
 
 
-// ── 5.13.50 – Operation single-flight coordinator ────────────────────────
+// ── 5.13.56 – Operation single-flight coordinator ────────────────────────
 let __activeOperation = null;
 let __providerSyncFlight = null;
 let __drainingOperation = null;
@@ -449,7 +449,7 @@ const OPERATION_DEFAULT_TIMEOUT_MS = 90000;
 const HEAVY_OPERATION_TYPES = new Set(['provider_sync', 'scheduled_pipeline', 'local_workflow', 'classifieds_maintainer', 'publish_wizard_rebuild', 'market_scanner', 'inventory_sync']);
 function nowIso() { return new Date().toISOString(); }
 
-// ── 5.13.50 – Watchdog helpers ────────────────────────────────────────────
+// ── 5.13.56 – Watchdog helpers ────────────────────────────────────────────
 function getOperationAgeMs() {
   if (!__activeOperation || !__activeOperation.active || !__activeOperation.started_ms) return 0;
   return Date.now() - __activeOperation.started_ms;
@@ -572,7 +572,7 @@ function assertOperationStillAlive(operationId, stage) {
     throw new Error(`operation_timed_out_at_${String(stage || 'unknown')}`);
   }
 }
-// 5.13.51 – Independent 2-second watchdog (not scheduler-dependent)
+// 5.13.56 – Independent 2-second watchdog (not scheduler-dependent)
 let __operationWatchdogInterval = null;
 function startOperationWatchdog() {
   if (__operationWatchdogInterval) return;
@@ -1961,7 +1961,7 @@ function getOptions() {
     backpack_tf_enabled: bool(options.backpack_tf_enabled, true),
     backpack_tf_access_token: String(credentialAccount.backpack_tf_access_token || options.backpack_tf_access_token || '').trim(),
     backpack_tf_api_key: String(credentialAccount.backpack_tf_api_key || options.backpack_tf_api_key || '').trim(),
-    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.55').trim(),
+    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.56').trim(),
     backpack_tf_base_url: String(options.backpack_tf_base_url || 'https://backpack.tf').replace(/\/$/, ''),
     backpack_tf_cache_ttl_minutes: clamp(options.backpack_tf_cache_ttl_minutes, 30, 1, 1440),
     backpack_tf_retry_count: clamp(options.backpack_tf_retry_count, 2, 0, 5),
@@ -3634,7 +3634,7 @@ class BackpackTfV2ListingManager {
     return configured.endsWith('/api') ? configured : `${configured}/api`;
   }
   headers(authMode = 'token') {
-    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.55' };
+    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.56' };
     if (authMode === 'token' && this.options.backpack_tf_access_token) headers['X-Auth-Token'] = this.options.backpack_tf_access_token;
     if (authMode === 'bearer' && this.options.backpack_tf_access_token) headers.authorization = `Bearer ${this.options.backpack_tf_access_token}`;
     if (authMode === 'api_key_header' && this.options.backpack_tf_api_key) headers['x-api-key'] = this.options.backpack_tf_api_key;
@@ -7059,7 +7059,7 @@ async function archiveStaleSellListingsGuarded(options = getOptions(), auditServ
   try { auditService?.write(result.archived ? 'stale_sell_listings_archived' : 'stale_sell_archive_noop', { archived: result.archived, failed: result.failed, source }); } catch {}
   try { appendActionFeed(result.archived ? 'stale_sell_listings_archived' : 'stale_sell_archive_noop', { archived: result.archived, failed: result.failed, source }); } catch {}
   if (result.archived) {
-    try { await new BackpackTfV2ListingManager(options, auditService).syncListings(true); } catch {}
+    try { await new BackpackTfV2ListingManager(options, auditService).syncListings(false); } catch {}
   }
   return result;
 }
@@ -7328,7 +7328,7 @@ class StartupRebuildControllerService {
       result.fast_fill_until = fastUntil;
       result.startup_batch_size = Number(options.startup_rebuild_batch_size || 5);
 
-      await step('sync_backpack_listings', async () => (options.backpack_tf_enabled && (options.backpack_tf_access_token || options.backpack_tf_api_key)) ? new BackpackTfV2ListingManager(options, this.audit).syncListings(true) : { ok: true, skipped: true, reason: 'backpack_credentials_missing_or_disabled' });
+      await step('sync_backpack_listings', async () => (options.backpack_tf_enabled && (options.backpack_tf_access_token || options.backpack_tf_api_key)) ? new BackpackTfV2ListingManager(options, this.audit).syncListings(false) : { ok: true, skipped: true, reason: 'backpack_credentials_missing_or_disabled' });
       await step('sync_inventory', async () => (options.inventory_sync_enabled && options.steam_id64) ? new SteamInventorySyncService(this.audit).sync(true) : { ok: true, skipped: true, reason: 'steamid_missing_or_inventory_disabled' });
       await step('market_scanner', async () => options.market_scanner_enabled ? new MarketTargetScannerService(this.audit).build(options) : { ok: true, skipped: true, reason: 'market_scanner_disabled' });
       await step('planning_queue_rebuild', async () => new PlanningQueueService(this.audit).rebuild('startup_rebuild_controller'));
@@ -7471,7 +7471,7 @@ class StartupListingArchiveService {
       const saved = this.write(result);
       this.audit?.write(result.ok ? 'startup_listing_archive_completed' : 'startup_listing_archive_failed', { source, status: result.status, provider_http_status: result.provider_http_status || null, attempts: result.attempts.length });
       appendActionFeed(result.ok ? 'startup_listing_archive_completed' : 'startup_listing_archive_failed', { source, status: result.status, provider_http_status: result.provider_http_status || null });
-      if (result.ok) { try { await new BackpackTfV2ListingManager(options, this.audit).syncListings(true); } catch (error) { this.audit?.write('startup_listing_archive_resync_failed', { message: safeError(error) }); } }
+      if (result.ok) { try { await new BackpackTfV2ListingManager(options, this.audit).syncListings(false); } catch (error) { this.audit?.write('startup_listing_archive_resync_failed', { message: safeError(error) }); } }
       return saved;
     } catch (error) {
       result.ok = false; result.status = 'archive_exception'; result.error = safeError(error); result.last_run_at = new Date().toISOString();
@@ -7641,7 +7641,7 @@ async function verifyPublishedListing(draftId, options = getOptions(), auditServ
   const draft = drafts[idx];
   let sync = readJson(BACKPACK_LISTINGS_PATH, { ok: false, listings: [] });
   if (forceSync) {
-    try { sync = await new BackpackTfV2ListingManager(options, audit).syncListings(true); }
+    try { sync = await new BackpackTfV2ListingManager(options, audit).syncListings(false); }
     catch (error) { sync = { ok: false, error: safeError(error), listings: [] }; }
   }
   const listings = readAccountListingsArray();
@@ -7736,7 +7736,7 @@ async function runLocalWorkflow(auditSvc) {
     try { markOperationStage(`local_workflow:${name}`); const r = await fn(); steps.push({ step: name, ok: r && r.ok !== false, duration_ms: Date.now() - t0, summary: r ? { ok: r.ok, error: r.error || null, items: r.items?.length || r.candidates?.length || r.drafts?.length || r.entries?.length || null } : null }); return r; }
     catch (err) { steps.push({ step: name, ok: false, duration_ms: Date.now() - t0, error: safeError(err) }); return { ok: false, error: safeError(err) }; }
   };
-  await step('provider_sync', async () => (options.backpack_tf_enabled && (options.backpack_tf_access_token || options.backpack_tf_api_key)) ? new BackpackTfV2ListingManager(options, auditSvc).syncListings(true) : { ok: true, skipped: true, reason: 'backpack_credentials_missing_or_disabled' });
+  await step('provider_sync', async () => (options.backpack_tf_enabled && (options.backpack_tf_access_token || options.backpack_tf_api_key)) ? new BackpackTfV2ListingManager(options, auditSvc).syncListings(false) : { ok: true, skipped: true, reason: 'backpack_credentials_missing_or_disabled' });
   await step('inventory_sync', async () => (options.inventory_sync_enabled && options.steam_id64) ? new SteamInventorySyncService(auditSvc).sync(true) : { ok: true, skipped: true, reason: 'steamid_missing_or_inventory_disabled' });
   await step('auto_sell_relister', async () => new BoughtItemAutoSellRelisterService(auditSvc).run('local_workflow', { publish: true, sync_inventory: false }));
   await step('manual_owned_sell_detector', async () => new ManualOwnedItemSellDetectorService(auditSvc).run('local_workflow', { publish: true, sync_inventory: false }));
@@ -8307,7 +8307,7 @@ class SteamInventorySyncService {
       let accepted = null;
       let lastFailure = null;
       for (const variant of this.inventoryUrls(options.steam_id64, startAssetId)) {
-        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.55' } });
+        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.56' } });
         const body = result.body || {};
         const parsed = result.ok ? this.extractInventoryPayload(body) : { ok: false, error: result.error || body.error || body.raw || `HTTP ${result.status}` };
         attempts.push({
@@ -10547,7 +10547,7 @@ class HubAutopilotPipelineService {
     try {
       if (options.backpack_tf_enabled && options.hub_autopilot_sync_backpack && (options.backpack_tf_access_token || options.backpack_tf_api_key)) {
         markOperationStage('scheduled_pipeline:provider_sync');
-        const sync = await new BackpackTfV2ListingManager(options, this.audit).syncListings(true);
+        const sync = await new BackpackTfV2ListingManager(options, this.audit).syncListings(false);
         result.stages.push({ stage: 'provider_sync', ok: Boolean(sync.ok), listings: Number(sync.listings_count || 0), prices: Number(sync.prices_count || 0), cache_stage: sync.stage || null, error: sync.error || null });
       } else {
         result.stages.push({ stage: 'provider_sync', skipped: true, reason: 'disabled_or_credentials_missing' });
@@ -12039,14 +12039,32 @@ class PersistentClassifiedsMaintainerService {
       }
       const listingManager = new BackpackTfV2ListingManager(options, this.audit);
       throwIfOperationAborted(context && context.signal, 'maintainer_before_provider_sync');
-      // 5.13.55: Maintain now must be lightweight. Do not force a fresh Backpack.tf price-schema download/parse.
+      // 5.13.56: Maintain now must be lightweight. Do not force a fresh Backpack.tf price-schema download/parse.
       // A forced provider sync parses ~45k price rows and can trigger HA Supervisor SIGKILL on smaller hosts.
       const sync = await withStageTimeout('maintainer_provider_sync_cached', 12000, () => listingManager.syncListings(false));
       throwIfOperationAborted(context && context.signal, 'maintainer_after_provider_sync');
       result.steps.push({ stage: 'sync_account_listings_cached', ok: Boolean(sync.ok), cached: Boolean(sync.cached), listings: Number(sync.listings_count || 0), error: sync.error || null });
 
-      // 5.13.55: yield before heavy post-sync work to prevent SIGKILL from HA supervisor
-      await yieldToEventLoop(); throwIfOperationAborted(context && context.signal, 'maintainer_before_stale_guard');
+      // 5.13.56: yield before heavy post-sync work to prevent SIGKILL from HA supervisor
+      await yieldToEventLoop();
+        // SAFE_MINIMAL_MAINTAINER_5_13_56
+        const __safeMinimalMaintainerEnabled_5_13_56 = (typeof options === 'undefined' || !options || options.persistent_classifieds_maintainer_safe_minimal_mode_enabled !== false);
+        if (__safeMinimalMaintainerEnabled_5_13_56) {
+          const __safeMinimalReason_5_13_56 = (typeof reason !== 'undefined' && reason) ? reason : 'unknown';
+          try {
+            if (typeof runtimeLogger !== 'undefined' && runtimeLogger && runtimeLogger.info) {
+              runtimeLogger.info('maintainer', 'maintainer_minimal_mode_enabled', 'Safe minimal maintainer mode enabled after provider sync', { reason: __safeMinimalReason_5_13_56, mode: 'safe_minimal' });
+              runtimeLogger.info('maintainer', 'maintainer_legacy_steps_skipped', 'Legacy post-sync maintainer steps skipped by Safe Minimal Maintainer mode', { reason: __safeMinimalReason_5_13_56 });
+              runtimeLogger.info('maintainer', 'maintainer_minimal_completed', 'Safe minimal maintainer completed after provider sync', { reason: __safeMinimalReason_5_13_56 });
+            }
+          } catch (_) {}
+          result.safe_minimal_mode = true;
+          result.skipped_legacy_steps = true;
+          result.steps.push({ stage: 'safe_minimal_legacy_steps', ok: true, skipped: true, reason: 'safe_minimal_mode' });
+          result.completed_at = new Date().toISOString();
+          result.ok = result.ok !== false;
+          return result;
+        }throwIfOperationAborted(context && context.signal, 'maintainer_before_stale_guard');
       // 5.13.29: stale sell listings (sell listing exists but owned asset is gone)
       // should not keep the account dirty forever.  Archive only when guarded
       // Backpack.tf write sliders are enabled; never touch Steam trades.
@@ -13083,7 +13101,7 @@ class DiagnosticBundleService {
         return payload;
       }
     };
-    await stage('provider_sync', async () => (options.backpack_tf_enabled && (options.backpack_tf_access_token || options.backpack_tf_api_key)) ? new BackpackTfV2ListingManager(options, this.audit).syncListings(true) : { ok: true, skipped: true, reason: 'backpack_credentials_missing_or_disabled' });
+    await stage('provider_sync', async () => (options.backpack_tf_enabled && (options.backpack_tf_access_token || options.backpack_tf_api_key)) ? new BackpackTfV2ListingManager(options, this.audit).syncListings(false) : { ok: true, skipped: true, reason: 'backpack_credentials_missing_or_disabled' });
     await stage('inventory_sync', async () => (options.inventory_sync_enabled && options.steam_id64) ? new SteamInventorySyncService(this.audit).sync(true) : { ok: true, skipped: true, reason: 'steamid_missing_or_inventory_disabled' });
     await stage('market_scanner', async () => options.market_scanner_enabled ? new MarketTargetScannerService(this.audit).build(options) : { ok: true, skipped: true, reason: 'market_scanner_disabled' });
     await stage('trade_review', async () => (options.steam_web_api_key && options.steam_id64) ? this.reviewService.review('diagnostic_bundle') : { ok: true, skipped: true, reason: 'steam_api_or_steamid_missing' });
@@ -13202,7 +13220,7 @@ async function handleApi(req, res, pathname) {
     try { releaseStaleOperationIfNeeded('status_endpoint'); } catch {}
     const options = getOptions();
     const state = readJson(STATE_PATH, {});
-    // 5.13.50: Fast cached status — no heavy rebuilds, no maintainer.status() call.
+    // 5.13.56: Fast cached status — no heavy rebuilds, no maintainer.status() call.
     // Read the last persisted maintainer state directly from disk (one JSON read, cheap).
     const maintainerFile = readJson(CLASSIFIEDS_MAINTAINER_PATH, { ok: true, enabled: false, running: false });
     const maintainerCached = {
@@ -13222,7 +13240,7 @@ async function handleApi(req, res, pathname) {
       ok: true,
       app: APP_NAME,
       version: APP_VERSION,
-      scope: '5.13.55 – Backpack Price Schema Memory Cache',
+      scope: '5.13.56 – Backpack Price Schema Memory Cache',
       mode: 'operations_cockpit_notifications_persistence_listing_engine_targeted_orders_multi_account_strategy_ollama',
       steam_web_api_key_saved: Boolean(options.steam_web_api_key),
       steam_web_api_key: redacted(options.steam_web_api_key),
@@ -13745,7 +13763,7 @@ async function handleApi(req, res, pathname) {
   if (pathname === '/api/backpack/listings') return json(res, 200, readJson(BACKPACK_LISTINGS_PATH, { ok: false, error: 'No backpack.tf listing cache yet.' }));
   if (pathname === '/api/backpack/sync') {
     if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'Use POST.' });
-    const result = await runExclusiveOperation('provider_sync', 'manual_backpack_sync', async () => new BackpackTfV2ListingManager(getOptions(), auditService).syncListings(true), { timeoutMs: 45000 });
+    const result = await runExclusiveOperation('provider_sync', 'manual_backpack_sync', async () => new BackpackTfV2ListingManager(getOptions(), auditService).syncListings(false), { timeoutMs: 45000 });
     return json(res, result.busy ? 202 : (result.ok ? 200 : 400), result.result || result);
   }
   if (pathname === '/api/market-scanner') return json(res, 200, readJson(MARKET_SCANNER_PATH, { ok: false, error: 'No market scanner snapshot yet. Run Build market scanner after Sync Backpack.tf.', candidates: [] }));
@@ -14045,7 +14063,7 @@ async function handleApi(req, res, pathname) {
   }
   if (pathname === '/api/publish-wizard/prepare-key-to-metal' && (req.method === 'POST' || req.method === 'GET')) return json(res, 200, prepareKeyToMetalDraft(getOptions(), auditService));
   if (pathname === '/api/most-traded/status' || pathname === '/api/offer-booster/status' || pathname === '/api/auto-list-anything/status') return json(res, 200, buildMostTradedAndKeysStatus(getOptions()));
-  // 5.13.50: lite endpoint is always fast; full /status returns cached-only snapshot.
+  // 5.13.56: lite endpoint is always fast; full /status returns cached-only snapshot.
   // Heavy rebuild must be explicitly requested via POST /api/publish-wizard/rebuild.
   if (pathname === '/api/publish-wizard/status/lite') { try { return json(res, 200, buildPublishWizardLiteStatus()); } catch (error) { return json(res, 200, { ok: true, lite: true, version: APP_VERSION, updated_at: new Date().toISOString(), safe_fallback: true, error: safeError(error) }); } }
   if (pathname === '/api/publish-wizard/status') {
@@ -14058,7 +14076,7 @@ async function handleApi(req, res, pathname) {
     return json(res, 200, { ok: true, version: APP_VERSION, updated_at: new Date().toISOString(), cached: false, maintainer_running: __maintainerRunning, operation: operationPublicSnapshot(), active_operation: operationPublicSnapshot(), steps: [], guarded_publish_enabled: Boolean(options.allow_guarded_backpack_publish), live_classifieds_writes_enabled: Boolean(options.allow_live_classifieds_writes), backpack_tf_write_mode: options.backpack_tf_write_mode, publish_disabled_reason: 'Dashboard status not built yet. Click Rebuild to load.', classifieds_maintainer: { ok: true, running: __maintainerRunning, enabled: classifiedsMaintainer.enabled(options), note: 'pre_build_lite' }, auto_sell_relister: { ok: true, note: 'pre_build_lite' }, trade_offer_state_machine: { ok: true, counts: {}, states: [], next_action: 'Status will be available after first rebuild.' } });
   }
   if (pathname === '/api/publish-wizard/rebuild' && (req.method === 'POST' || req.method === 'GET')) {
-    // 5.13.50: Heavy rebuild is single-flight and never overlaps provider/maintainer.
+    // 5.13.56: Heavy rebuild is single-flight and never overlaps provider/maintainer.
     const result = await runExclusiveOperation('publish_wizard_rebuild', 'manual_publish_wizard_rebuild', async () => getCachedPublishWizardStatus(), { timeoutMs: 30000 });
     if (result.busy) return json(res, 202, result);
     if (result.ok && result.result) return json(res, 200, { ...result.result, rebuilt: true, operation: operationPublicSnapshot(), active_operation: operationPublicSnapshot() });
@@ -14131,7 +14149,7 @@ async function handleApi(req, res, pathname) {
     // still in progress.  Start manual runs in the background and return an
     // immediate accepted status.  The live dashboard poll then reads the run
     // result from /api/classifieds-maintainer/status.
-    // 5.13.53: If maintainer is OFF, Maintain now returns a friendly message and does not run the heavy operation.
+    // 5.13.56: If maintainer is OFF, Maintain now returns a friendly message and does not run the heavy operation.
     if (!runtimeMaintainerEnabled(getOptions().persistent_classifieds_maintainer_enabled)) {
       return json(res, 200, { ok: false, version: APP_VERSION, maintainer_off: true, message: 'Maintainer is OFF. Enable the Maintainer toggle on the dashboard before using Maintain now.' });
     }
@@ -14190,7 +14208,7 @@ async function runMaintainerIsolated(reason = 'scheduled_classifieds_maintainer'
     audit('maintainer_skipped_already_running', { reason });
     return { ok: false, skipped: true, reason: 'already_running' };
   }
-  // 5.13.50: Capture the owning operation token at start so we can detect stale continuation.
+  // 5.13.56: Capture the owning operation token at start so we can detect stale continuation.
   const owningOperationId = context.operationId || (__activeOperation && __activeOperation.id) || null;
   function isMaintainerOperationStillActive() {
     if (!owningOperationId) return true;
@@ -14253,7 +14271,7 @@ async function runMaintainerIsolated(reason = 'scheduled_classifieds_maintainer'
       __lastMaintainerTimeoutAt = Date.now();
       try { audit('maintainer_timeout_released_lock', { reason, elapsed_ms: elapsed, error: errSafe, owningOperationId }); } catch {}
       try { appendActionFeed('maintainer_timeout_released_lock', { reason, elapsed_ms: elapsed, error: errSafe, owningOperationId }); } catch {}
-      // 5.13.50: Hard release the lock if the operation is still held (e.g. event-loop delay caused Promise.race to be late).
+      // 5.13.56: Hard release the lock if the operation is still held (e.g. event-loop delay caused Promise.race to be late).
       if (__activeOperation && __activeOperation.active && __activeOperation.id === owningOperationId) {
         try { logOperationEvent('maintainer_timeout_released_lock', { operationId: owningOperationId, elapsed_ms: elapsed, reason: 'hard_release_in_catch' }, 'warn'); } catch {}
         try { __activeOperation.abort_controller && __activeOperation.abort_controller.abort(); } catch {}
@@ -14291,7 +14309,7 @@ function startScheduler() {
     runtimeLogger.info('scheduler', 'scheduler_tick_started', 'Scheduler tick started', { uptime_seconds: Math.round(process.uptime()) });
     Promise.resolve().then(async () => {
       try {
-        // 5.13.50: preflight watchdog — release stale locks before scheduling any job.
+        // 5.13.56: preflight watchdog — release stale locks before scheduling any job.
         try { releaseStaleOperationIfNeeded('scheduler_preflight'); } catch {}
         let heavyJobRanThisTick = false;
         if (hubAutopilot.due()) {
@@ -14308,9 +14326,9 @@ function startScheduler() {
             }
           }
         }
-        // 5.13.50: second preflight — in case scheduled_pipeline just released the lock via timeout.
+        // 5.13.56: second preflight — in case scheduled_pipeline just released the lock via timeout.
         try { releaseStaleOperationIfNeeded('scheduler_preflight_post_pipeline'); } catch {}
-        // 5.13.52: Auto maintainer is disabled by default. Requires explicit opt-in.
+        // 5.13.56: Auto maintainer is disabled by default. Requires explicit opt-in.
         const maintainerAutoRunEnabled = options.persistent_classifieds_maintainer_auto_run_enabled === true;
         if (classifiedsMaintainer.due() && !maintainerAutoRunEnabled) {
           runtimeLogger.info('scheduler', 'maintainer_auto_run_disabled', 'Auto maintainer skipped: persistent_classifieds_maintainer_auto_run_enabled is not true. Use Maintain now manually.', {});

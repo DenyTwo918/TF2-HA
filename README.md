@@ -2,7 +2,7 @@
 
 Home Assistant add-on repository snapshot.
 
-Current TF2 Trading Hub build: 5.13.55 – Fix Maintain now crash (event-loop block after provider sync).
+Current TF2 Trading Hub build: 5.13.56 – Fix Maintain now crash (event-loop block after provider sync).
 
 ## 5.13.42 – Price Schema Deep Sync Fix
 
