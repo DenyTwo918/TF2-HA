@@ -724,7 +724,7 @@ async function refresh(){
     safe('/api/opportunities','opportunities snapshot',12000).then(renderOpportunities)
   ]).catch(()=>{});
   scheduleLiveDashboardRefresh(250);
-  setLog({ok:true,version:(versionAudit&&versionAudit.expected)||'5.13.49',hydrated_dashboard_load:true,message:'Dashboard loaded. Live status will keep hydrating in the background.'});
+  setLog({ok:true,version:(versionAudit&&versionAudit.expected)||'5.13.50',hydrated_dashboard_load:true,message:'Dashboard loaded. Live status will keep hydrating in the background.'});
 }
 async function loadJsonTo(selector,path,options){const data=await api(path,options);qs(selector).textContent=JSON.stringify(data,null,2);return data;}
 async function runReview(){qs('#review').disabled=true;try{await loadJsonTo('#logs','/api/review/run',{method:'POST',body:'{}'});await api('/api/trading-core/build',{method:'POST',body:'{}'});await refresh();}catch(e){setLog(e.body||e.message);}finally{qs('#review').disabled=false;}}
@@ -1012,7 +1012,7 @@ function renderLocalWorkflow(data){
 function renderPublishWizard(data){
   const el=document.getElementById('publishWizard');if(!el)return;
   if(!data||data.error){el.innerHTML=`<p class="muted">${esc2(data&&data.error||'No production dashboard data yet.')}</p>`;return;}
-  if(data.version&&data.ok&&data.steps===undefined&&data.candidate_draft_id===undefined&&data.classifieds_maintainer===undefined){el.innerHTML=`<p class="badText"><b>Production dashboard data mapping mismatch.</b> Refresh response was not /api/publish-wizard/status. Update to 5.13.49 or reload with Ctrl+F5.</p><pre>${esc2(JSON.stringify(data,null,2).slice(0,1000))}</pre>`;return;}
+  if(data.version&&data.ok&&data.steps===undefined&&data.candidate_draft_id===undefined&&data.classifieds_maintainer===undefined){el.innerHTML=`<p class="badText"><b>Production dashboard data mapping mismatch.</b> Refresh response was not /api/publish-wizard/status. Update to 5.13.50 or reload with Ctrl+F5.</p><pre>${esc2(JSON.stringify(data,null,2).slice(0,1000))}</pre>`;return;}
   const maint=data.classifieds_maintainer||{};
   const autoSell=data.auto_sell_relister||{};
   const manualOwnedSell=data.manual_owned_sell_detector||{};
@@ -1042,7 +1042,11 @@ function renderPublishWizard(data){
   const op=(data.operation||data.active_operation||{});
   const opBusy=!!(op.active||op.activeOperation);
   const opType=op.activeOperationType||op.type||'';
-  const opAge=Math.round(Number(op.activeOperationAgeMs||op.age_ms||0)/1000);
+  const opAgeMs=Number(op.activeOperationAgeMs||op.age_ms||0);
+  const opAge=Math.round(opAgeMs/1000);
+  const opExpired=!!(op.expired);
+  function fmtElapsed(s){if(!s||s<=0)return'0s';if(s<60)return s+'s';return Math.floor(s/60)+'m '+( s%60)+'s';}
+  const opElapsed=opAgeMs>0?fmtElapsed(opAge):'0s';
   const activeCount=Number(maint.active_total_listings||activeOverview.total||matches.length||(last.already_active||0)||0);
   const problems=(last.errors||0)+(last.archived_or_currency||0)+(last.duplicate_skipped||0);
   const autoCounters=(autoSell.last_result&&autoSell.last_result.counters)||{};
@@ -1050,7 +1054,7 @@ function renderPublishWizard(data){
   let html=`<div class="productionHero ${publishModeOk?'okBox':'warnBox'}">`;
   html+=`<div><p class="eyebrow">Bot loop</p><h3>${publishModeOk?'Running guarded classifieds mode':'Publish mode not fully enabled'}</h3><p class="muted">${publishModeOk?'Maintainer can keep listings active while the sliders stay on.':'Enable guarded publish + live classifieds writes in add-on options, then restart.'}</p></div>`;
   html+=`<span class="bigStatusPill ${publishModeOk?'ok':'warn'}">${publishModeOk?'ON':'SETUP'}</span></div>`;
-  if(opBusy){html+=`<div class="miniRow warnBox"><b>Running: ${esc2(opType||'operation')}</b><small>started ${esc2(op.activeOperationStartedAt||op.started_at||'')} · elapsed ${esc2(opAge)}s · stage ${esc2(op.last_stage||'running')} · buttons are locked to prevent overlapping Backpack.tf syncs.</small></div>`;}
+  if(opBusy){html+=`<div class="miniRow ${opExpired?'badBox':'warnBox'}"><b>Running: ${esc2(opType||'operation')}</b><small>started ${esc2(op.activeOperationStartedAt||op.started_at||'')} · elapsed ${esc2(opElapsed)} · stage ${esc2(op.last_stage||op.lastStage||'running')} · deadline ${esc2(op.activeOperationDeadlineAt||'—')} · buttons are locked to prevent overlapping Backpack.tf syncs.</small>${opExpired?`<div style="margin-top:6px"><span class="pill bad">Operation exceeded timeout. Lock will be released automatically.</span> <button class="button small" onclick="api('/api/operations/release-stale',{method:'POST'}).then(r=>{setLog(r);setTimeout(()=>window.location.reload(),800);}).catch(e=>setLog({ok:false,error:e.message}))">Release stale operation</button></div>`:''}</div>`;}
   html+=`<div class="productionGrid">`;
   html+=`<div class="productionMetric"><span>Startup archive</span><strong>${startupArchive.startup_auto_will_run?'ON':'Manual'}</strong><small>${esc2(startupArchive.status||'not run')} · ${startupArchive.archived_all?'archived all active listings':'waiting'} · ${startupArchive.startup_auto_confirmed?'restart cleanup armed':'safe: no auto archive on restart'}</small></div>`;
   html+=`<div class="productionMetric ${startupRebuild.running?'warnBox':''}"><span>Startup rebuild</span><strong>${startupRebuild.running?'Running':(startupRebuild.fast_fill_active?'Fast fill':'Ready')}</strong><small>${esc2(startupRebuild.status||'not run')} · fill ${esc2(rebuildProgress.active_total||0)}/${esc2(rebuildProgress.cap||600)} · free ${esc2(rebuildProgress.free_slots||0)} · batch ${esc2(startupRebuild.fast_fill_active?startupRebuild.startup_batch_size:startupRebuild.normal_batch_size||3)}</small></div>`;
