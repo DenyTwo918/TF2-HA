@@ -10,9 +10,9 @@
   <main class="shell">
     <section class="hero hubHero">
       <div>
-        <p class="eyebrow">Home Assistant add-on · 5.13.45 · Main Account Save Must Never Hang</p>
+        <p class="eyebrow">Home Assistant add-on · 5.13.46 · Maintainer Crash Isolation + Fast Status API</p>
         <h1>TF2 Trading Hub</h1>
-        <p class="lead">Production dashboard: Fast local-only credential save; hard 1500ms timeout; scheduler skips while save is active.</p><div class="buildBanner"><b>Build 5.13.45 loaded</b><span>Save endpoint is fully local — no Backpack.tf/Steam calls; returns within 500ms; 1500ms hard timeout returns HTTP 504; scheduler skips tick during save.</span></div>
+        <p class="lead">Production dashboard: Fast cached /api/status; fast cached /api/publish-wizard/status; maintainer 90s hard timeout with full crash isolation.</p><div class="buildBanner"><b>Build 5.13.46 loaded</b><span>/api/status returns in under 500ms; maintainer never kills the process; POST /api/publish-wizard/rebuild for explicit heavy rebuild.</span></div>
         <div class="heroActions diagnosticFirstActions">
           <button id="runDiagnosticBundle" class="primary">Diagnostic bundle for assistant</button>
           <button id="refreshAll">Refresh cockpit</button><button id="toggleSimpleUi">Show advanced UI</button>
