@@ -1,4 +1,4 @@
-# 5.13.48 – True Maintainer Hard Timeout + Cooperative Abort
+# 5.13.49 – Trade State d Reference Fix
 
 - Replaces heavy maintainer startup status rebuild with a lightweight running marker so the 90s timeout timer can fire on time.
 - Adds cooperative abort/yield checks before provider sync, auto-sell, manual-owned sell, queue refill, draft approval and each guarded publish attempt.

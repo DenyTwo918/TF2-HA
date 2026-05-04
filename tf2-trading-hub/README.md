@@ -108,15 +108,15 @@ Adds a Backpack.tf listing verification endpoint, automatic post-publish verific
 The maintainer can now auto-fill buy listing slots toward `target_active_buy_listings` while keeping a default stock cap of one item per SKU. Existing active buy listings, owned items, active sell listings and good incoming offers prevent another buy listing for the same item.
 
 
-## 5.13.48 – True Maintainer Hard Timeout + Cooperative Abort
+## 5.13.49 – Trade State d Reference Fix
 
 Adds a central runtime operation coordinator, `/api/operations/status`, provider sync de-duplication, scheduler busy-skips, maintainer busy-skips and dashboard button locking so heavy Backpack.tf workflows do not overlap. Credential vault and trading safety defaults are unchanged.
 
-## 5.13.48 – True Maintainer Hard Timeout + Cooperative Abort
+## 5.13.49 – Trade State d Reference Fix
 
 `GET /api/status` is now fully fast (no `classifiedsMaintainer.status()` rebuild, no triple SteamGuardModule calls — single JSON read + one SteamGuard call). `GET /api/publish-wizard/status` returns cached snapshot only; returns safe empty structure if no cache exists. Heavy publish wizard rebuild moved to `POST /api/publish-wizard/rebuild` with 30s timeout. `scheduled_classifieds_maintainer` is now wrapped in `runMaintainerIsolated()`: global `__maintainerRunning` mutex, 90s `Promise.race` hard timeout, full try/catch, writes `tf2-hub-last-crash.json` on failure, emits `maintainer_started` / `maintainer_completed` / `maintainer_timeout` / `maintainer_failed` / `maintainer_skipped_already_running` action feed events. Process never exits on maintainer failure. Manual maintainer run endpoint also uses `runMaintainerIsolated`. `runtimeState` global tracks last error and timestamps.
 
-## 5.13.48 – Main Account Save Must Never Hang
+## 5.13.49 – Main Account Save Must Never Hang
 
 `POST /api/main-account/save` and new `POST /api/main-account/save-local-only` are now fully local-only — no Backpack.tf HTTP calls, no Steam calls, no provider health checks. A global `__saveInProgress` flag prevents scheduler ticks from running concurrent I/O while a save is active (`scheduler_skipped_save_in_progress` event emitted). Hard 1500ms `Promise.race` timeout wrapper returns HTTP 504 JSON on timeout. Step-by-step action feed events: `main_account_save_started`, `main_account_save_read_existing`, `main_account_save_merged`, `main_account_save_write_tmp`, `main_account_save_rename_done`, `main_account_save_verified`, `main_account_last_good_written`, `main_account_save_done`, `main_account_save_failed`. Save response is minimal (no `provider_health`, no circular spread). Frontend uses `/api/main-account/save-local-only` with 3000ms timeout and shows exact error+trace_id on failure; separate status call after save.
 
