@@ -4,7 +4,7 @@
 
 async function api(path, opts = {}) {
   const r = await fetch(path, {
-    headers: { 'Content-Type': 'application/json', ...opts.headers },
+    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
     ...opts,
   });
   const text = await r.text();
@@ -17,7 +17,11 @@ async function api(path, opts = {}) {
 // ─── DOM helpers ──────────────────────────────────────────────────────────────
 
 const qs  = s => document.querySelector(s);
-const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const qsa = s => Array.from(document.querySelectorAll(s));
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({
+  '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+}[c]));
+const cssEsc = s => (window.CSS && CSS.escape ? CSS.escape(String(s)) : String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&'));
 
 function show(el, visible = true) {
   if (typeof el === 'string') el = qs(el);
@@ -29,28 +33,67 @@ function setText(id, text) {
   if (el) el.textContent = text;
 }
 
-// ─── Status badge ─────────────────────────────────────────────────────────────
+function fmtTime(value) {
+  if (!value) return 'Not synced';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? 'Not synced' : `Synced ${d.toLocaleTimeString()}`;
+}
+
+function setBusy(button, busy, label) {
+  if (!button) return;
+  if (busy) button.dataset.originalText = button.textContent;
+  button.disabled = busy;
+  button.textContent = busy ? label : (button.dataset.originalText || button.textContent);
+}
+
+// ─── Status ──────────────────────────────────────────────────────────────────
 
 const STATUS_CLASS = {
-  online:      'online',
-  connecting:  'connecting',
-  offline:     'offline',
-  error:       'error',
-  needs_2fa:   'warn',
+  online: 'online',
+  connecting: 'connecting',
+  offline: 'offline',
+  error: 'error',
+  needs_2fa: 'warn',
 };
+
+let lastStatus = null;
+let logLines = [];
 
 function renderStatus(data) {
   const badge = qs('#statusBadge');
+  const cls = STATUS_CLASS[data.status] || 'offline';
   if (badge) {
-    badge.textContent = data.status;
-    badge.className   = 'status-badge ' + (STATUS_CLASS[data.status] || 'offline');
+    badge.textContent = data.status || 'offline';
+    badge.className = `status-badge ${cls}`;
   }
 
+  const statusPill = qs('#statusPill');
+  if (statusPill) {
+    statusPill.textContent = data.status || 'offline';
+    statusPill.className = `pill ${cls}`;
+  }
+
+  const version = data.version || '5.13.60';
+  setText('sideVersion', version);
+
   const c = data.credentials || {};
-  setText('statSteam',     data.username || data.steam_id || (c.has_username ? c.username : '—'));
-  setText('statOffers',    data.offer_queue ?? '—');
-  setText('statListings',  data.listing_count ?? '—');
-  setText('statInventory', data.inventory_count ?? '—');
+  const steamLabel = data.display_name || data.username || data.steam_id || c.username || 'Not connected';
+  setText('statSteam', steamLabel);
+  setText('statSteamSub', c.has_username ? 'Credentials saved' : 'Credentials missing');
+  setText('statOffers', data.offer_queue ?? 0);
+  setText('statListings', data.listing_count ?? 0);
+  setText('statInventory', data.inventory_count ?? 0);
+  setText('statListingSync', fmtTime(data.last_listing_sync));
+  setText('statInventorySync', fmtTime(data.last_inv_sync));
+
+  const hasOffers = Number(data.offer_queue || 0) > 0;
+  const hasListings = Number(data.listing_count || 0) > 0;
+  const hasInventory = Number(data.inventory_count || 0) > 0;
+  const online = data.status === 'online';
+  setHealthBar('barSteam', online ? 100 : data.status === 'connecting' ? 45 : 14);
+  setHealthBar('barOffers', hasOffers ? 88 : online ? 50 : 20);
+  setHealthBar('barBackpack', hasListings ? 90 : c.has_bptf_token ? 42 : 16);
+  setHealthBar('barInventory', hasInventory ? 92 : c.steam_id || data.steam_id ? 38 : 14);
 
   const errEl = qs('#loginError');
   if (errEl) {
@@ -62,164 +105,230 @@ function renderStatus(data) {
     }
   }
 
-  // Show setup banner if credentials missing
   const needsSetup = !c.has_username || !c.has_password;
   show('#setupBanner', needsSetup);
 }
 
-// ─── Trade offers ─────────────────────────────────────────────────────────────
+function setHealthBar(id, value) {
+  const el = qs(`#${id}`);
+  if (el) el.style.setProperty('--value', `${Math.max(0, Math.min(100, value))}%`);
+}
+
+// ─── Offers ──────────────────────────────────────────────────────────────────
+
+function itemChip(item, direction) {
+  const name = item?.name || 'Unknown item';
+  return `<span class="item-chip ${direction}" title="${esc(name)}">${esc(name)}</span>`;
+}
 
 function renderOffer(offer) {
-  const gave    = offer.items_to_give?.length    || 0;
-  const receive = offer.items_to_receive?.length || 0;
-  const giftTag = offer.is_gift ? '<span class="pill gift">Gift</span>' : '';
-
-  const giveHtml    = (offer.items_to_give || []).map(i => `<span class="item">${esc(i.name)}</span>`).join('');
-  const receiveHtml = (offer.items_to_receive || []).map(i => `<span class="item">${esc(i.name)}</span>`).join('');
+  const give = offer.items_to_give || [];
+  const receive = offer.items_to_receive || [];
+  const giftTag = offer.is_gift ? '<span class="pill safe">Gift</span>' : '';
+  const risk = give.length > receive.length ? 'Needs review' : receive.length > 0 ? 'Inbound value' : 'Empty offer';
 
   return `
-    <div class="offer" id="offer-${esc(offer.id)}">
-      <div class="offer-head">
-        <strong>Offer #${esc(offer.id)}</strong>
-        <span class="partner">from ${esc(offer.partner)}</span>
-        ${giftTag}
-        <span class="pill">▲ ${gave} give</span>
-        <span class="pill">▼ ${receive} receive</span>
+    <article class="offer-card" data-offer-id="${esc(offer.id)}">
+      <div class="offer-topline">
+        <div>
+          <strong>Offer #${esc(offer.id)}</strong>
+          <p>Partner ${esc(offer.partner || 'unknown')}</p>
+        </div>
+        <div class="offer-tags">
+          ${giftTag}
+          <span class="pill">${esc(risk)}</span>
+          <span class="pill">${receive.length} in</span>
+          <span class="pill">${give.length} out</span>
+        </div>
       </div>
-      ${offer.message ? `<p class="offer-msg">${esc(offer.message)}</p>` : ''}
-      <div class="offer-items">
-        ${giveHtml ? `<div class="item-group"><label>You give</label>${giveHtml}</div>` : ''}
-        ${receiveHtml ? `<div class="item-group"><label>You receive</label>${receiveHtml}</div>` : ''}
+      ${offer.message ? `<blockquote>${esc(offer.message)}</blockquote>` : ''}
+      <div class="offer-columns">
+        <div class="offer-column give">
+          <span>You give</span>
+          <div>${give.length ? give.map(i => itemChip(i, 'out')).join('') : '<em>Nothing</em>'}</div>
+        </div>
+        <div class="offer-column receive">
+          <span>You receive</span>
+          <div>${receive.length ? receive.map(i => itemChip(i, 'in')).join('') : '<em>Nothing</em>'}</div>
+        </div>
       </div>
-      <div class="btn-row">
-        <button class="primary" onclick="acceptOffer('${esc(offer.id)}')">Accept</button>
-        <button class="danger"  onclick="declineOffer('${esc(offer.id)}')">Decline</button>
+      <div class="offer-actions">
+        <button class="btn btn-primary" data-action="accept-offer" data-id="${esc(offer.id)}">Accept</button>
+        <button class="btn btn-danger" data-action="decline-offer" data-id="${esc(offer.id)}">Decline</button>
       </div>
-    </div>`;
+    </article>`;
 }
 
-function renderOffers(offers) {
+function renderOffers(offers = []) {
   const el = qs('#offerList');
-  const countEl = qs('#offerCount');
   if (!el) return;
-  if (!offers || offers.length === 0) {
-    el.innerHTML = '<p class="empty">No pending offers.</p>';
-  } else {
-    el.innerHTML = offers.map(renderOffer).join('');
-  }
-  if (countEl) countEl.textContent = offers?.length || 0;
+  setText('offerCount', offers.length || 0);
+  el.innerHTML = offers.length
+    ? offers.map(renderOffer).join('')
+    : '<div class="empty-state">No pending trade offers. The cockpit will light up when a new offer arrives.</div>';
 }
 
-async function acceptOffer(id) {
-  const btn = qs(`#offer-${id} .primary`);
-  if (btn) { btn.disabled = true; btn.textContent = 'Accepting…'; }
+async function loadOffers() {
+  const data = await api('/api/offers');
+  renderOffers(data.offers || []);
+  return data.offers || [];
+}
+
+async function syncOffers(button) {
+  setBusy(button, true, 'Scanning…');
   try {
-    await api(`/api/offers/${id}/accept`, { method: 'POST' });
+    const data = await api('/api/offers/sync', { method: 'POST' });
+    renderOffers(data.offers || []);
+    addLog('info', `Offer sync complete: ${(data.offers || []).length} pending`);
+  } catch (err) {
+    addLog('error', `Offer sync failed: ${err.message}`);
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+async function acceptOffer(id, button) {
+  setBusy(button, true, 'Accepting…');
+  try {
+    await api(`/api/offers/${encodeURIComponent(id)}/accept`, { method: 'POST' });
+    qs(`[data-offer-id="${cssEsc(id)}"]`)?.remove();
     addLog('info', `Offer ${id} accepted`);
-    qs(`#offer-${id}`)?.remove();
-    const remaining = qs('#offerList')?.children.length || 0;
-    if (remaining === 0) qs('#offerList').innerHTML = '<p class="empty">No pending offers.</p>';
+    await refreshCockpit(false);
   } catch (err) {
     addLog('error', `Accept failed: ${err.message}`);
-    if (btn) { btn.disabled = false; btn.textContent = 'Accept'; }
+  } finally {
+    setBusy(button, false);
   }
 }
 
-async function declineOffer(id) {
-  const btn = qs(`#offer-${id} .danger`);
-  if (btn) { btn.disabled = true; btn.textContent = 'Declining…'; }
+async function declineOffer(id, button) {
+  setBusy(button, true, 'Declining…');
   try {
-    await api(`/api/offers/${id}/decline`, { method: 'POST' });
+    await api(`/api/offers/${encodeURIComponent(id)}/decline`, { method: 'POST' });
+    qs(`[data-offer-id="${cssEsc(id)}"]`)?.remove();
     addLog('info', `Offer ${id} declined`);
-    qs(`#offer-${id}`)?.remove();
-    const remaining = qs('#offerList')?.children.length || 0;
-    if (remaining === 0) qs('#offerList').innerHTML = '<p class="empty">No pending offers.</p>';
+    await refreshCockpit(false);
   } catch (err) {
     addLog('error', `Decline failed: ${err.message}`);
-    if (btn) { btn.disabled = false; btn.textContent = 'Decline'; }
+  } finally {
+    setBusy(button, false);
   }
 }
 
-// ─── Listings ─────────────────────────────────────────────────────────────────
+// ─── Listings ────────────────────────────────────────────────────────────────
 
-function renderListings(listings) {
+function listingPrice(currencies) {
+  if (!currencies) return '?';
+  return Object.entries(currencies)
+    .map(([k, v]) => `${v} ${k}`)
+    .join(' + ') || '?';
+}
+
+function renderListings(listings = []) {
   const el = qs('#listingList');
   if (!el) return;
-  if (!listings || listings.length === 0) {
-    el.innerHTML = '<p class="empty">No active listings.</p>';
-    return;
-  }
-  el.innerHTML = listings.map(l => {
-    const price = l.currencies
-      ? Object.entries(l.currencies).map(([k, v]) => `${v} ${k}`).join(' + ')
-      : '?';
-    const intentClass = l.intent === 'buy' ? 'pill-buy' : 'pill-sell';
-    return `
-      <div class="listing-row">
-        <span class="pill ${intentClass}">${esc(l.intent)}</span>
-        <span class="listing-name">${esc(l.item_name)}</span>
-        <span class="listing-price">${esc(price)}</span>
-        <button class="small danger" onclick="archiveListing('${esc(l.id)}')">Remove</button>
-      </div>`;
-  }).join('');
-}
-
-async function archiveListing(id) {
-  try {
-    await api(`/api/listings/${id}`, { method: 'DELETE' });
-    addLog('info', `Listing ${id} removed`);
-    loadListings();
-  } catch (err) {
-    addLog('error', `Remove listing failed: ${err.message}`);
-  }
+  el.innerHTML = listings.length
+    ? listings.map(l => `
+      <article class="listing-card">
+        <span class="intent ${l.intent === 'buy' ? 'buy' : 'sell'}">${esc(l.intent || 'listing')}</span>
+        <strong>${esc(l.item_name || 'Unknown item')}</strong>
+        <span class="listing-price">${esc(listingPrice(l.currencies))}</span>
+        <button class="btn btn-danger btn-small" data-action="delete-listing" data-id="${esc(l.id)}">Remove</button>
+      </article>`).join('')
+    : '<div class="empty-state">No listings loaded yet. Sync Backpack.tf listings to populate this panel.</div>';
 }
 
 async function loadListings() {
+  const data = await api('/api/listings');
+  renderListings(data.listings || []);
+  return data.listings || [];
+}
+
+async function syncListings(button) {
+  setBusy(button, true, 'Syncing…');
   try {
     const data = await api('/api/listings/sync', { method: 'POST' });
-    renderListings(data.listings);
+    renderListings(data.listings || []);
+    setText('statListings', (data.listings || []).length);
+    setText('statListingSync', fmtTime(data.last_sync));
+    addLog('info', `Listings synced: ${(data.listings || []).length}`);
   } catch (err) {
-    addLog('warn', `Listings sync failed: ${err.message}`);
+    addLog('error', `Listings sync failed: ${err.message}`);
+  } finally {
+    setBusy(button, false);
   }
 }
 
-// ─── Inventory ────────────────────────────────────────────────────────────────
+async function deleteListing(id, button) {
+  setBusy(button, true, 'Removing…');
+  try {
+    await api(`/api/listings/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    addLog('info', `Listing ${id} removed`);
+    await syncListings(null);
+  } catch (err) {
+    addLog('error', `Remove listing failed: ${err.message}`);
+  } finally {
+    setBusy(button, false);
+  }
+}
 
-function renderInventory(items) {
-  const el    = qs('#inventoryGrid');
-  const count = qs('#invCount');
+// ─── Inventory ───────────────────────────────────────────────────────────────
+
+function renderInventory(items = []) {
+  const el = qs('#inventoryGrid');
   if (!el) return;
-  if (count) count.textContent = items?.length || 0;
-  if (!items || items.length === 0) {
-    el.innerHTML = '<p class="empty">Inventory empty or not loaded.</p>';
-    return;
-  }
-  el.innerHTML = items.slice(0, 200).map(i =>
-    `<div class="inv-item" title="${esc(i.name)}">${esc(i.name)}</div>`
-  ).join('');
-  if (items.length > 200) {
-    el.innerHTML += `<p class="empty">…and ${items.length - 200} more</p>`;
-  }
+  setText('invCount', items.length || 0);
+  el.innerHTML = items.length
+    ? items.slice(0, 240).map(item => {
+      const name = item.name || 'Unknown';
+      const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map(s => s[0]).join('').toUpperCase() || 'TF';
+      return `<article class="inventory-card" title="${esc(name)}">
+        <div class="item-icon">${esc(initials)}</div>
+        <strong>${esc(name)}</strong>
+        <span>${esc(item.quality || 'Tradable')}</span>
+      </article>`;
+    }).join('') + (items.length > 240 ? `<div class="empty-state">…and ${items.length - 240} more items</div>` : '')
+    : '<div class="empty-state">Inventory is empty or not loaded yet.</div>';
 }
 
 async function loadInventory() {
+  const data = await api('/api/inventory');
+  renderInventory(data.inventory || []);
+  setText('statInventory', data.count ?? (data.inventory || []).length);
+  setText('statInventorySync', fmtTime(data.last_sync));
+}
+
+async function syncInventory(button) {
+  setBusy(button, true, 'Syncing…');
   try {
     const data = await api('/api/inventory/sync', { method: 'POST' });
-    renderInventory(data.inventory);
-    setText('invCount', data.count ?? 0);
-    setText('statInventory', data.count ?? '—');
+    renderInventory(data.inventory || []);
+    setText('statInventory', data.count ?? (data.inventory || []).length);
+    setText('statInventorySync', fmtTime(data.last_sync));
+    addLog('info', `Inventory synced: ${data.count ?? 0} tradable items`);
   } catch (err) {
-    addLog('warn', `Inventory sync failed: ${err.message}`);
+    addLog('error', `Inventory sync failed: ${err.message}`);
+  } finally {
+    setBusy(button, false);
   }
 }
 
-// ─── Event log ────────────────────────────────────────────────────────────────
+async function refreshPrices(button) {
+  setBusy(button, true, 'Refreshing…');
+  try {
+    const data = await api('/api/prices/schema');
+    addLog('info', `Price schema loaded: ${data.item_count || 0} items`);
+  } catch (err) {
+    addLog('error', `Price refresh failed: ${err.message}`);
+  } finally {
+    setBusy(button, false);
+  }
+}
 
-let logLines = [];
+// ─── Events ──────────────────────────────────────────────────────────────────
 
-function addLog(level, message, data = {}) {
-  const ts    = new Date().toLocaleTimeString();
-  const entry = { ts, level, message, ...data };
+function addLog(level, message) {
+  const entry = { ts: new Date().toLocaleTimeString(), level: level || 'info', message };
   logLines.unshift(entry);
   if (logLines.length > 300) logLines = logLines.slice(0, 300);
   renderLog();
@@ -228,125 +337,143 @@ function addLog(level, message, data = {}) {
 function renderLog() {
   const el = qs('#eventLog');
   if (!el) return;
-  el.innerHTML = logLines.slice(0, 100).map(e =>
-    `<div class="log-line ${esc(e.level)}"><span class="log-ts">${esc(e.ts)}</span> <span class="log-msg">${esc(e.message || e.event || '')}</span></div>`
-  ).join('');
+  el.innerHTML = logLines.length
+    ? logLines.slice(0, 120).map(e => `<div class="log-line ${esc(e.level)}"><span>${esc(e.ts)}</span><strong>${esc(e.level)}</strong><p>${esc(e.message || e.event || '')}</p></div>`).join('')
+    : '<div class="empty-state">No events loaded yet.</div>';
 }
 
 async function loadEvents() {
   try {
     const data = await api('/api/events');
     logLines = (data.events || []).map(e => ({
-      ts:      new Date(e.ts).toLocaleTimeString(),
-      level:   e.level || 'info',
+      ts: new Date(e.ts).toLocaleTimeString(),
+      level: e.level || 'info',
       message: e.event || '',
     }));
     renderLog();
-  } catch { /* non-fatal */ }
+  } catch {
+    renderLog();
+  }
 }
-
-// ─── SSE live feed ────────────────────────────────────────────────────────────
 
 function connectSSE() {
-  const es = new EventSource('/api/events/stream');
-  es.onmessage = e => {
-    let msg;
-    try { msg = JSON.parse(e.data); } catch { return; }
-    if (msg.type === 'status') {
-      loadStatus();
-    } else if (msg.type === 'offer' && msg.offer) {
-      const existing = qs(`#offer-${msg.offer.id}`);
-      if (!existing) {
-        const el = qs('#offerList');
-        const empty = el?.querySelector('.empty');
-        empty?.remove();
-        const div = document.createElement('div');
-        div.innerHTML = renderOffer(msg.offer);
-        el?.prepend(div.firstElementChild);
-        const countEl = qs('#offerCount');
-        if (countEl) countEl.textContent = Number(countEl.textContent || 0) + 1;
+  try {
+    const es = new EventSource('/api/events/stream');
+    es.onmessage = e => {
+      let msg;
+      try { msg = JSON.parse(e.data); } catch { return; }
+      if (msg.type === 'status') loadStatus();
+      if (msg.type === 'offer' && msg.offer) {
+        addLog('info', `New offer ${msg.offer.id}`);
+        loadOffers();
       }
-    } else if (msg.type === 'log' && msg.entry) {
-      addLog(msg.entry.level, msg.entry.event || '', {});
-    }
-  };
-  es.onerror = () => {
-    // EventSource auto-reconnects; just suppress noise
-  };
+      if (msg.type === 'log' && msg.entry) {
+        addLog(msg.entry.level, msg.entry.event || 'runtime event');
+      }
+    };
+  } catch {
+    // Polling still works if SSE is unavailable through a proxy.
+  }
 }
 
-// ─── Main poll ────────────────────────────────────────────────────────────────
-
-let lastStatus = null;
+// ─── Main loading ────────────────────────────────────────────────────────────
 
 async function loadStatus() {
   try {
     const data = await api('/api/status');
     renderStatus(data);
-    // Only re-render offers/listings if counts changed
-    if (!lastStatus || lastStatus.offer_queue !== data.offer_queue) {
-      const offers = await api('/api/offers');
-      renderOffers(offers.offers);
-    }
+    if (!lastStatus || lastStatus.offer_queue !== data.offer_queue) await loadOffers();
     lastStatus = data;
   } catch (err) {
-    qs('#statusBadge').textContent = 'error';
-    qs('#statusBadge').className   = 'status-badge error';
+    const badge = qs('#statusBadge');
+    if (badge) {
+      badge.textContent = 'error';
+      badge.className = 'status-badge error';
+    }
   }
 }
 
-// ─── Init ─────────────────────────────────────────────────────────────────────
+async function refreshCockpit(syncExternal = false) {
+  await loadStatus();
+  await Promise.allSettled([loadOffers(), loadListings(), loadInventory(), loadEvents()]);
+  if (syncExternal) addLog('info', 'Cockpit refreshed');
+}
+
+// ─── UI wiring ───────────────────────────────────────────────────────────────
+
+document.addEventListener('click', async e => {
+  const btn = e.target.closest('button[data-action]');
+  if (!btn) return;
+  const id = btn.dataset.id;
+  if (btn.dataset.action === 'accept-offer') return acceptOffer(id, btn);
+  if (btn.dataset.action === 'decline-offer') return declineOffer(id, btn);
+  if (btn.dataset.action === 'delete-listing') return deleteListing(id, btn);
+});
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Credentials form
   const form = qs('#credsForm');
   form?.addEventListener('submit', async e => {
     e.preventDefault();
-    const fd    = new FormData(form);
+    const fd = new FormData(form);
     const patch = Object.fromEntries(fd.entries());
-    const btn   = form.querySelector('[type=submit]');
+    const btn = form.querySelector('[type=submit]');
     const status = qs('#credsSaveStatus');
-    btn.disabled = true;
-    btn.textContent = 'Saving…';
+    setBusy(btn, true, 'Saving…');
     try {
       await api('/api/credentials', { method: 'POST', body: JSON.stringify(patch) });
-      if (status) { status.textContent = 'Saved.'; status.classList.remove('hidden'); }
+      if (status) {
+        status.textContent = 'Saved. Empty fields were ignored.';
+        status.className = 'save-status success';
+      }
       addLog('info', 'Credentials saved');
       form.reset();
-      loadStatus();
+      await loadStatus();
     } catch (err) {
-      if (status) { status.textContent = 'Error: ' + err.message; status.classList.remove('hidden'); }
-      addLog('error', 'Credentials save failed: ' + err.message);
+      if (status) {
+        status.textContent = `Error: ${err.message}`;
+        status.className = 'save-status error';
+      }
+      addLog('error', `Credentials save failed: ${err.message}`);
     } finally {
-      btn.disabled    = false;
-      btn.textContent = 'Save credentials';
+      setBusy(btn, false);
     }
   });
 
-  // Buttons
-  qs('#btnLogin')?.addEventListener('click', async () => {
-    await api('/api/bot/login', { method: 'POST' }).catch(() => {});
-    loadStatus();
+  qs('#btnLogin')?.addEventListener('click', async e => {
+    setBusy(e.currentTarget, true, 'Connecting…');
+    try { await api('/api/bot/login', { method: 'POST' }); addLog('info', 'Bot login requested'); }
+    catch (err) { addLog('error', `Login failed: ${err.message}`); }
+    finally { setBusy(e.currentTarget, false); loadStatus(); }
   });
-  qs('#btnDisconnect')?.addEventListener('click', async () => {
-    await api('/api/bot/disconnect', { method: 'POST' }).catch(() => {});
-    loadStatus();
+
+  qs('#btnDisconnect')?.addEventListener('click', async e => {
+    setBusy(e.currentTarget, true, 'Disconnecting…');
+    try { await api('/api/bot/disconnect', { method: 'POST' }); addLog('info', 'Bot disconnected'); }
+    catch (err) { addLog('error', `Disconnect failed: ${err.message}`); }
+    finally { setBusy(e.currentTarget, false); loadStatus(); }
   });
-  qs('#btnSyncOffers')?.addEventListener('click', async () => {
-    const data = await api('/api/offers/sync', { method: 'POST' }).catch(() => ({ offers: [] }));
-    renderOffers(data.offers);
+
+  const bind = (id, fn) => qs(id)?.addEventListener('click', e => fn(e.currentTarget));
+  bind('#btnSyncOffers', syncOffers);
+  bind('#btnSyncOffersTop', syncOffers);
+  bind('#btnSyncListings', syncListings);
+  bind('#btnSyncListingsTop', syncListings);
+  bind('#btnSyncInventory', syncInventory);
+  bind('#btnSyncInventoryTop', syncInventory);
+  bind('#btnLoadPrices', refreshPrices);
+  qs('#btnRefreshAll')?.addEventListener('click', e => {
+    setBusy(e.currentTarget, true, 'Refreshing…');
+    refreshCockpit(true).finally(() => setBusy(e.currentTarget, false));
   });
-  qs('#btnSyncListings')?.addEventListener('click', () => loadListings());
-  qs('#btnSyncInventory')?.addEventListener('click', () => loadInventory());
   qs('#btnClearLog')?.addEventListener('click', () => { logLines = []; renderLog(); });
 
-  // Initial load
-  loadStatus();
-  loadEvents();
+  // Sidebar highlight for in-page navigation.
+  qsa('.nav-link').forEach(a => a.addEventListener('click', () => {
+    qsa('.nav-link').forEach(x => x.classList.remove('active'));
+    a.classList.add('active');
+  }));
 
-  // Live feed
+  refreshCockpit(false);
   connectSSE();
-
-  // Poll every 10 s as fallback
   setInterval(loadStatus, 10000);
 });

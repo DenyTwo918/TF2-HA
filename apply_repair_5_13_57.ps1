@@ -1,7 +1,34 @@
+$ErrorActionPreference = "Stop"
+
+Write-Host "=== TF2-HA 5.13.57 repository repair ==="
+
+function Write-Utf8NoBom {
+    param([string]$Path, [string]$Text)
+    $dir = Split-Path -Parent $Path
+    if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+    $enc = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $Text, $enc)
+}
+
+function Fix-Versions {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return }
+    $t = [System.IO.File]::ReadAllText($Path)
+    $t = $t -replace "5\.13\.(47|48|49|50|51|52|53|54|55|56)", "5.13.57"
+    $t = $t -replace "[ \t]+(`r?`n)", '$1'
+    Write-Utf8NoBom -Path $Path -Text $t
+}
+
+$repoRoot = (git rev-parse --show-toplevel 2>$null).Trim()
+if (-not $repoRoot) { throw "Run this from inside the TF2-HA repo folder." }
+
+Write-Host "Repo root: $repoRoot"
+
+$configYaml = @'
 slug: tf2_trading_hub
 name: TF2 Trading Hub
-version: "5.13.60"
-description: Crash-safe TF2 Trading Hub with Steam TradeOfferManager, backpack.tf listings, and manual review UI.
+version: "5.13.57"
+description: Minimal safe TF2 Trading Hub with manual maintainer control.
 url: https://github.com/DenyTwo918/TF2-HA
 arch:
   - amd64
@@ -19,12 +46,6 @@ homeassistant_api: true
 panel_icon: mdi:chart-line
 panel_title: TF2 Trading Hub
 
-ports:
-  8099/tcp: 8099
-ports_description:
-  8099/tcp: Direct TF2 Trading Hub Web UI
-webui: "http://[HOST]:[PORT:8099]"
-
 options:
   global_kill_switch: false
 
@@ -36,7 +57,7 @@ options:
   persistent_classifieds_max_publishes_per_cycle: 20
 
   backpack_tf_enabled: true
-  backpack_tf_user_agent: TF2-HA-TF2-Trading-Hub/5.13.60
+  backpack_tf_user_agent: TF2-HA-TF2-Trading-Hub/5.13.57
   backpack_tf_base_url: https://backpack.tf
   backpack_tf_cache_ttl_minutes: 30
   backpack_tf_retry_count: 2
@@ -656,3 +677,158 @@ schema:
   publish_error_inspector_count_brain_blocks_as_filtered: bool
   adaptive_fill_ignore_safe_filtered_errors: bool
   adaptive_fill_provider_error_only_slowdown: bool
+
+'@
+$dockerfile = @'
+ARG BUILD_ARCH=amd64
+FROM ghcr.io/home-assistant/${BUILD_ARCH}-base:latest
+
+ARG BUILD_VERSION=5.13.57
+ARG BUILD_ARCH=amd64
+
+LABEL io.hass.name="TF2 Trading Hub" \
+      io.hass.description="Minimal safe TF2 Trading Hub with manual maintainer control." \
+      io.hass.type="addon" \
+      io.hass.version="${BUILD_VERSION}" \
+      maintainer="DenyTwo918" \
+      org.opencontainers.image.title="TF2 Trading Hub" \
+      org.opencontainers.image.version="${BUILD_VERSION}" \
+      org.opencontainers.image.source="https://github.com/DenyTwo918/TF2-HA"
+
+RUN apk add --no-cache nodejs
+
+WORKDIR /app
+
+COPY dist ./dist
+COPY public ./public
+COPY package.json ./package.json
+COPY config.yaml ./config.yaml
+COPY run.sh /run.sh
+
+RUN chmod +x /run.sh
+
+EXPOSE 8099
+
+CMD ["/run.sh"]
+
+'@
+$buildYaml = @'
+build_from:
+  amd64: ghcr.io/home-assistant/amd64-base:latest
+  aarch64: ghcr.io/home-assistant/aarch64-base:latest
+  armv7: ghcr.io/home-assistant/armv7-base:latest
+  armhf: ghcr.io/home-assistant/armhf-base:latest
+  i386: ghcr.io/home-assistant/i386-base:latest
+args:
+  BUILD_VERSION: "5.13.57"
+labels:
+  org.opencontainers.image.title: "TF2 Trading Hub"
+  org.opencontainers.image.version: "5.13.57"
+  org.opencontainers.image.source: "https://github.com/DenyTwo918/TF2-HA"
+
+'@
+$runSh = @'
+#!/usr/bin/env sh
+set -eu
+
+echo "[tf2-hub] version: 5.13.57"
+echo "[tf2-hub] Minimal UI + Controlled Fill One"
+exec node /app/dist/server.js
+
+'@
+$repositoryYaml = @'
+name: TF2-HA
+url: https://github.com/DenyTwo918/TF2-HA
+maintainer: DenyTwo918
+
+'@
+$packageJson = @'
+{
+  "name": "tf2-trading-hub",
+  "version": "5.13.57",
+  "description": "Minimal safe TF2 Trading Hub with controlled fill one",
+  "main": "dist/server.js",
+  "scripts": {
+    "start": "node dist/server.js"
+  },
+  "dependencies": {}
+}
+
+'@
+$readme = @'
+# TF2-HA
+
+Current TF2 Trading Hub build: 5.13.57 - Minimal UI + Controlled Fill One.
+
+Repository contains the TF2 Trading Hub Home Assistant add-on and optional SDA Bridge helper.
+
+Safety defaults remain guarded/manual: no live trade accepts, no Steam confirmations, no unsafe automatic publishing.
+
+'@
+$update = @'
+# Update 5.13.57 - Minimal UI + Controlled Fill One
+
+- Restored valid multiline Home Assistant add-on files.
+- Fixed config.yaml option defaults.
+- Restored run.sh and repository.yaml.
+- Kept Safe Minimal Maintainer enabled.
+- Kept Controlled Fill One enabled.
+- Kept auto maintainer disabled.
+- Kept manual/guarded safety defaults.
+
+'@
+
+Write-Utf8NoBom (Join-Path $repoRoot "tf2-trading-hub/config.yaml") $configYaml
+Write-Utf8NoBom (Join-Path $repoRoot "tf2-trading-hub/Dockerfile") $dockerfile
+Write-Utf8NoBom (Join-Path $repoRoot "tf2-trading-hub/build.yaml") $buildYaml
+Write-Utf8NoBom (Join-Path $repoRoot "tf2-trading-hub/run.sh") $runSh
+Write-Utf8NoBom (Join-Path $repoRoot "tf2-trading-hub/package.json") $packageJson
+Write-Utf8NoBom (Join-Path $repoRoot "repository.yaml") $repositoryYaml
+Write-Utf8NoBom (Join-Path $repoRoot "README.md") $readme
+Write-Utf8NoBom (Join-Path $repoRoot "tf2-trading-hub/UPDATE_5_13_57.md") $update
+
+$files = @(
+ "tf2-trading-hub/dist/server.js",
+ "tf2-trading-hub/dist/index.js",
+ "tf2-trading-hub/public/app.js",
+ "tf2-trading-hub/public/index.html",
+ "README.md",
+ "tf2-trading-hub/config.yaml",
+ "tf2-trading-hub/Dockerfile",
+ "tf2-trading-hub/build.yaml",
+ "tf2-trading-hub/run.sh",
+ "tf2-trading-hub/package.json",
+ "repository.yaml"
+)
+foreach ($f in $files) { Fix-Versions (Join-Path $repoRoot $f) }
+
+git diff --check
+if ($LASTEXITCODE -ne 0) { throw "git diff --check failed" }
+
+$nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+if ($nodeCmd) {
+    node --check (Join-Path $repoRoot "tf2-trading-hub/dist/server.js")
+    if ($LASTEXITCODE -ne 0) { throw "node --check server.js failed" }
+    if (Test-Path (Join-Path $repoRoot "tf2-trading-hub/dist/index.js")) {
+        node --check (Join-Path $repoRoot "tf2-trading-hub/dist/index.js")
+        if ($LASTEXITCODE -ne 0) { throw "node --check index.js failed" }
+    }
+} else {
+    Write-Host "Node.js not found, skipping node --check."
+}
+
+git add README.md repository.yaml tf2-trading-hub/config.yaml tf2-trading-hub/Dockerfile tf2-trading-hub/build.yaml tf2-trading-hub/run.sh tf2-trading-hub/package.json tf2-trading-hub/UPDATE_5_13_57.md tf2-trading-hub/dist/server.js tf2-trading-hub/dist/index.js tf2-trading-hub/public/app.js tf2-trading-hub/public/index.html
+git commit -m "5.13.57 - repair HA repo files and minimal config"
+if ($LASTEXITCODE -ne 0) { Write-Host "Commit skipped or nothing to commit." }
+
+Write-Host "Pushing HEAD directly to origin/main..."
+git push origin HEAD:main
+if ($LASTEXITCODE -ne 0) {
+    $branch = (git branch --show-current).Trim()
+    Write-Host "Direct push failed; pushing current branch $branch."
+    git push -u origin $branch
+    if ($LASTEXITCODE -ne 0) { throw "Push failed." }
+    Write-Host "Open GitHub and merge branch $branch into main."
+} else {
+    Write-Host "Done. origin/main updated."
+}

@@ -1,7 +1,7 @@
 slug: tf2_trading_hub
 name: TF2 Trading Hub
-version: "5.13.60"
-description: Crash-safe TF2 Trading Hub with Steam TradeOfferManager, backpack.tf listings, and manual review UI.
+version: "5.13.57"
+description: Minimal safe TF2 Trading Hub with manual maintainer control.
 url: https://github.com/DenyTwo918/TF2-HA
 arch:
   - amd64
@@ -19,12 +19,6 @@ homeassistant_api: true
 panel_icon: mdi:chart-line
 panel_title: TF2 Trading Hub
 
-ports:
-  8099/tcp: 8099
-ports_description:
-  8099/tcp: Direct TF2 Trading Hub Web UI
-webui: "http://[HOST]:[PORT:8099]"
-
 options:
   global_kill_switch: false
 
@@ -36,7 +30,7 @@ options:
   persistent_classifieds_max_publishes_per_cycle: 20
 
   backpack_tf_enabled: true
-  backpack_tf_user_agent: TF2-HA-TF2-Trading-Hub/5.13.60
+  backpack_tf_user_agent: TF2-HA-TF2-Trading-Hub/5.13.57
   backpack_tf_base_url: https://backpack.tf
   backpack_tf_cache_ttl_minutes: 30
   backpack_tf_retry_count: 2
