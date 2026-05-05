@@ -1,10 +1,14 @@
 # TF2 Trading Hub
 
-Current build: **5.13.62 – Steam login throttle guard**.
+Current build: **5.13.63 – Manual Steam Guard pre-login fix**.
 
 A Home Assistant add-on for TF2 trade monitoring, manual trade review, backpack.tf listings, and Steam inventory visibility. This version replaces the previous large single-file runtime with a smaller Express-based server using Steam bot libraries inspired by TF2Autobot/tf2-express patterns.
 
-## What changed in 5.13.62
+## What changed in 5.13.63
+
+- Manual Steam Guard code can now be entered before Steam login starts.
+- Fixed missing throttle helper functions that could create unhandled errors after Steam client failures.
+- Clarified that Steam mobile login may not show a push notification; use the current Steam Guard code from the app.
 
 - Added throttle protection for `AccountLoginDeniedThrottle` so the add-on stops retrying after Steam temporarily blocks login attempts.
 - Added a dashboard button to clear stored `shared_secret` and `identity_secret` for manual phone-code login mode.
@@ -26,7 +30,7 @@ Live trade actions are still manual from the dashboard. The add-on does not auto
 
 1. Home Assistant → Settings → Add-ons → Add-on Store → menu (⋮) → Repositories.
 2. Add: `https://github.com/DenyTwo918/TF2-HA`.
-3. Install or update **TF2 Trading Hub** to **5.13.62**.
+3. Install or update **TF2 Trading Hub** to **5.13.63**.
 4. Rebuild/start the add-on and check logs for `server_ready`.
 
 ## Setup credentials
