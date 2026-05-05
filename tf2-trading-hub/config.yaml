@@ -29,6 +29,7 @@ options:
   persistent_classifieds_maintainer_enabled: true
   persistent_classifieds_maintainer_safe_minimal_mode_enabled: true
   persistent_classifieds_maintainer_auto_run_enabled: false
+  controlled_fill_one_enabled: true
   persistent_classifieds_interval_minutes: 5
   persistent_classifieds_max_publishes_per_cycle: 20
 
@@ -379,6 +380,7 @@ schema:
   persistent_classifieds_maintainer_enabled: bool
   persistent_classifieds_maintainer_safe_minimal_mode_enabled: bool
   persistent_classifieds_maintainer_auto_run_enabled: bool
+  controlled_fill_one_enabled: bool
   persistent_classifieds_interval_minutes: int(1,1440)
   persistent_classifieds_max_publishes_per_cycle: int(1,120)
 

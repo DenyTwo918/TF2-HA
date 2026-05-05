@@ -1,6 +1,6 @@
 {
   "name": "tf2-trading-hub-addon",
-  "version": "5.13.56",
+  "version": "5.13.57",
   "private": true,
   "main": "dist/server.js",
   "scripts": {
@@ -8,5 +8,5 @@
     "start": "node dist/server.js"
   },
   "dependencies": {},
-  "description": "TF2 Trading Hub: cache Backpack.tf price schema in memory to reduce maintainer CPU spikes and SIGKILL risk."
+  "description": "TF2 Trading Hub: minimal UI with controlled Fill 1 listing mode and safe maintainer defaults."
 }
