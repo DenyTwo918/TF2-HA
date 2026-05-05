@@ -11,7 +11,7 @@ const { EventEmitter } = require('events');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const VERSION  = '5.13.62';
+const VERSION  = '5.13.63';
 const PORT     = Number(process.env.PORT  || 8099);
 const DATA_DIR = process.env.DATA_DIR    || '/data';
 
@@ -136,6 +136,8 @@ const bot = {
   lastInvError:    null,
   invFailureCount: 0,
   nextInvSyncAfter: null,
+  lastInvSource:   null,
+  lastInvFailureLogAt: 0,
   offerManagerReady: false,
   startedAt:       new Date().toISOString(),
   desiredOnline:   wantsOnline(),
@@ -254,6 +256,18 @@ function normalizeInventoryItem(item) {
   };
 }
 
+function getCommunityInventory(steamId) {
+  return new Promise((resolve, reject) => {
+    if (!community || typeof community.getUserInventoryContents !== 'function') {
+      return reject(new Error('Steam community inventory API is not ready yet'));
+    }
+    community.getUserInventoryContents(steamId, 440, '2', true, (err, inventory) => {
+      if (err) return reject(err);
+      resolve(Array.isArray(inventory) ? inventory : []);
+    });
+  });
+}
+
 function getManagerInventory() {
   return new Promise((resolve, reject) => {
     if (!manager || !bot.offerManagerReady) {
@@ -266,8 +280,25 @@ function getManagerInventory() {
   });
 }
 
+async function getSteamWebApiInventory(steamId) {
+  const c = loadCreds();
+  if (!c.steam_api_key) throw new Error('No Steam Web API key configured');
+  const url = `https://api.steampowered.com/IEconItems_440/GetPlayerItems/v0001/?key=${encodeURIComponent(c.steam_api_key)}&steamid=${encodeURIComponent(steamId)}&format=json`;
+  const data = await apiFetch(url, {}, 20000);
+  const items = data?.result?.items || data?.response?.items || [];
+  return items.map(i => ({
+    assetid:  i.id || i.assetid || `${i.defindex || 'item'}-${i.inventory || Math.random()}`,
+    classid:  i.classid || String(i.defindex || ''),
+    defindex: i.defindex || null,
+    name:     i.name || (i.defindex ? `TF2 item #${i.defindex}` : 'TF2 item'),
+    quality:  i.quality !== undefined ? String(i.quality) : '',
+    tradable: !(i.flag_cannot_trade || i.cannot_trade),
+    amount:   Number(i.quantity || i.amount) || 1,
+  }));
+}
+
 async function getPublicInventory(steamId) {
-  const url = `https://steamcommunity.com/inventory/${steamId}/440/2?l=english&count=5000`;
+  const url = `https://steamcommunity.com/inventory/${encodeURIComponent(steamId)}/440/2?l=english&count=5000`;
   const data = await apiFetch(url, {}, 20000);
   const descriptions = new Map((data.descriptions || []).map(d => [`${d.classid}_${d.instanceid}`, d]));
   return (data.assets || []).map(a => {
@@ -283,16 +314,46 @@ async function getPublicInventory(steamId) {
   });
 }
 
-function setInventoryFailure(err) {
+async function getInventoryViaSources(steamId) {
+  const attempts = [];
+  const sources = [
+    ['community_session', () => getCommunityInventory(steamId)],
+    ['tradeoffer_manager', () => getManagerInventory()],
+    ['steam_web_api', () => getSteamWebApiInventory(steamId)],
+    ['public_inventory', () => getPublicInventory(steamId)],
+  ];
+
+  for (const [source, loader] of sources) {
+    try {
+      const items = await loader();
+      return { source, items };
+    } catch (err) {
+      attempts.push(`${source}: ${err.message || err}`);
+    }
+  }
+
+  const e = new Error(attempts.join(' | '));
+  e.attempts = attempts;
+  throw e;
+}
+
+function setInventoryFailure(err, { force = false } = {}) {
   bot.lastInvError = err.message || String(err);
   bot.invFailureCount += 1;
   const delayMinutes = Math.min(30, Math.max(2, bot.invFailureCount * 2));
   bot.nextInvSyncAfter = new Date(Date.now() + delayMinutes * 60 * 1000).toISOString();
-  log('warn', 'inventory_sync_failed', {
-    error: bot.lastInvError,
-    retry_after: bot.nextInvSyncAfter,
-    failure_count: bot.invFailureCount,
-  });
+
+  const now = Date.now();
+  const shouldLog = force || bot.invFailureCount === 1 || (now - bot.lastInvFailureLogAt) > 10 * 60 * 1000;
+  if (shouldLog) {
+    bot.lastInvFailureLogAt = now;
+    log('warn', 'inventory_sync_failed', {
+      error: bot.lastInvError,
+      retry_after: bot.nextInvSyncAfter,
+      source: bot.lastInvSource,
+      failure_count: bot.invFailureCount,
+    });
+  }
 }
 
 async function syncInventory({ force = false, throwOnError = false } = {}) {
@@ -300,7 +361,7 @@ async function syncInventory({ force = false, throwOnError = false } = {}) {
   const steamId = c.steam_id || bot.steamId;
   if (!steamId) {
     const err = new Error('No SteamID64 available for inventory sync');
-    setInventoryFailure(err);
+    setInventoryFailure(err, { force });
     if (throwOnError) throw err;
     return bot.inventory;
   }
@@ -310,25 +371,17 @@ async function syncInventory({ force = false, throwOnError = false } = {}) {
   }
 
   try {
-    let items;
-    let source = 'tradeoffer_manager';
-    try {
-      items = await getManagerInventory();
-    } catch (managerErr) {
-      source = 'public_inventory';
-      log('warn', 'inventory_manager_fetch_failed', { error: managerErr.message });
-      items = await getPublicInventory(steamId);
-    }
-
+    const { source, items } = await getInventoryViaSources(steamId);
     bot.inventory = items.map(normalizeInventoryItem).filter(i => i.tradable);
     bot.lastInvSync = new Date().toISOString();
     bot.lastInvError = null;
     bot.invFailureCount = 0;
     bot.nextInvSyncAfter = null;
+    bot.lastInvSource = source;
     writeJson(P.inventory, bot.inventory);
     log('info', 'inventory_synced', { count: bot.inventory.length, source });
   } catch (err) {
-    setInventoryFailure(err);
+    setInventoryFailure(err, { force });
     if (throwOnError) throw err;
   }
   return bot.inventory;
@@ -616,6 +669,7 @@ app.get('/api/status', (req, res) => {
     inventory_count: bot.inventory.length,
     inventory_error: bot.lastInvError,
     inventory_retry_after: bot.nextInvSyncAfter,
+    inventory_source: bot.lastInvSource,
     offer_manager_ready: bot.offerManagerReady,
     last_offer_sync: bot.lastOfferSync,
     last_listing_sync: bot.lastListingSync,
@@ -702,13 +756,13 @@ app.delete('/api/listings/:id', wrap(async (req, res) => {
 // ── Inventory ────────────────────────────────────────────────────────────────
 
 app.get('/api/inventory', (_req, res) =>
-  res.json({ ok: true, inventory: bot.inventory, count: bot.inventory.length, last_sync: bot.lastInvSync })
+  res.json({ ok: true, inventory: bot.inventory, count: bot.inventory.length, last_sync: bot.lastInvSync, source: bot.lastInvSource, error: bot.lastInvError })
 );
 
 app.post('/api/inventory/sync', wrap(async (req, res) => {
   try {
     await syncInventory({ force: true, throwOnError: true });
-    res.json({ ok: true, inventory: bot.inventory, count: bot.inventory.length, last_sync: bot.lastInvSync, error: null });
+    res.json({ ok: true, inventory: bot.inventory, count: bot.inventory.length, last_sync: bot.lastInvSync, source: bot.lastInvSource, error: null });
   } catch (err) {
     res.status(502).json({
       ok: false,
@@ -717,6 +771,7 @@ app.post('/api/inventory/sync', wrap(async (req, res) => {
       count: bot.inventory.length,
       last_sync: bot.lastInvSync,
       retry_after: bot.nextInvSyncAfter,
+      source: bot.lastInvSource,
     });
   }
 }));

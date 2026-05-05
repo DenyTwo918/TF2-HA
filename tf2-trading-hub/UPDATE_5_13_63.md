@@ -1,19 +1,20 @@
-# TF2 Trading Hub 5.13.63 - Manual Steam Guard Pre-login Fix
+# TF2 Trading Hub 5.13.63 — Inventory multi-source sync fix
 
-This patch fixes the mobile Steam Guard flow for accounts that do not use `shared_secret`.
+This patch fixes the repeated TF2 inventory sync failures seen as `HTTP 400` or `HTTP 404` in Home Assistant logs.
 
-## Fixed
+## Changes
 
-- Manual Steam Guard code is now collected before starting Steam login when no `shared_secret` is saved.
-- The UI no longer expects a Steam push notification. It tells the operator to open the Steam app and copy the current Steam Guard code manually.
-- Added missing throttle helper functions used by the Steam client error handler.
-- Keeps reconnect loops stopped when Steam returns login throttle errors.
-- Clarifies placeholders for optional `shared_secret` and `identity_secret` fields.
+- Adds a multi-source inventory sync chain:
+  1. authenticated Steam Community session,
+  2. Steam TradeOfferManager inventory,
+  3. Steam Web API `IEconItems_440/GetPlayerItems`,
+  4. public Steam inventory endpoint as a last fallback.
+- Keeps the existing cached inventory available when Steam rejects a live inventory fetch.
+- Adds stronger retry backoff and throttled audit logging so `inventory_sync_failed` does not spam logs every minute.
+- Adds `inventory_source` diagnostics to status, diagnostics and inventory sync responses.
+- Keeps the 5.13.62 reliable manual disconnect behavior.
+- Bumps all HA-visible version markers to `5.13.63`.
 
-## How to use
+## Notes
 
-1. Leave `shared_secret` empty if you only use the mobile Steam app.
-2. Save credentials.
-3. Click Connect.
-4. Open Steam mobile app → Steam Guard → show/copy current code.
-5. Enter the code in the Steam Guard card.
+If the public Steam inventory endpoint returns `HTTP 400` or `HTTP 404`, the bot now tries authenticated/session-based sources first and uses the public endpoint only as a final fallback.

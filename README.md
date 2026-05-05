@@ -1,6 +1,6 @@
 # TF2-HA
 
-Current TF2 Trading Hub build: 5.13.62 - reliable manual disconnect fix.
+Current TF2 Trading Hub build: 5.13.63 - inventory multi-source sync fix.
 
 Repository contains the TF2 Trading Hub Home Assistant add-on and optional SDA Bridge helper.
 

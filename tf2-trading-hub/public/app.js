@@ -73,7 +73,7 @@ function renderStatus(data) {
     statusPill.className = `pill ${cls}`;
   }
 
-  const version = data.version || '5.13.62';
+  const version = data.version || '5.13.63';
   setText('sideVersion', version);
 
   const connectBtn = qs('#btnLogin');
@@ -94,7 +94,7 @@ function renderStatus(data) {
     const retry = data.inventory_retry_after ? ` · retry ${fmtTime(data.inventory_retry_after).replace('Synced ', '')}` : '';
     setText('statInventorySync', `Inventory error: ${data.inventory_error}${retry}`);
   } else {
-    setText('statInventorySync', fmtTime(data.last_inv_sync));
+    setText('statInventorySync', data.inventory_source ? `${fmtTime(data.last_inv_sync)} · ${data.inventory_source}` : fmtTime(data.last_inv_sync));
   }
 
   const hasOffers = Number(data.offer_queue || 0) > 0;

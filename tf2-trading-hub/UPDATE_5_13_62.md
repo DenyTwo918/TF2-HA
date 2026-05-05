@@ -1,4 +1,4 @@
-# TF2 Trading Hub 5.13.62 — Reliable manual disconnect fix
+# TF2 Trading Hub 5.13.63 — Inventory multi-source sync fix
 
 This patch fixes the cockpit Disconnect button so it actually stops the Steam bot and prevents the automatic reconnect loop from immediately bringing TF2 back online.
 
