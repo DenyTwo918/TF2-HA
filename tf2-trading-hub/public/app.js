@@ -1,7 +1,7 @@
 'use strict';
 
 const state = {
-  version: '5.13.67',
+  version: '5.13.68',
   accounts: [],
   selected: 'main',
   selectedStatus: null,
@@ -17,8 +17,29 @@ const $ = (id) => document.getElementById(id);
 const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString() : 'Not synced';
 const esc = (s) => String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 
+function ingressBasePath() {
+  const path = window.location.pathname || '/';
+  const marker = '/api/hassio_ingress/';
+  const markerIndex = path.indexOf(marker);
+  if (markerIndex >= 0) {
+    const before = path.slice(0, markerIndex);
+    const rest = path.slice(markerIndex + marker.length);
+    const token = rest.split('/').filter(Boolean)[0] || '';
+    return `${before}${marker}${token}/`;
+  }
+  if (path.endsWith('/')) return path;
+  return path.replace(/\/[^/]*$/, '/') || '/';
+}
+
+function apiUrl(path) {
+  if (/^https?:\/\//i.test(path)) return path;
+  const clean = String(path || '').replace(/^\/+/, '');
+  const normalized = clean.startsWith('api/') ? clean : `api/${clean}`;
+  return new URL(normalized, `${window.location.origin}${ingressBasePath()}`).toString();
+}
+
 async function api(path, options = {}) {
-  const res = await fetch(path, {
+  const res = await fetch(apiUrl(path), {
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     ...options,
   });
@@ -289,7 +310,7 @@ function setupHandlers() {
 
 function connectSSE() {
   try {
-    const es = new EventSource('/api/events/stream');
+    const es = new EventSource(apiUrl('/api/events/stream'));
     es.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.type === 'log') { state.events.unshift(msg.entry); state.events = state.events.slice(0, 200); renderEvents(); }

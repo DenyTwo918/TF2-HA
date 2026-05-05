@@ -9,7 +9,7 @@ const fs = require("fs");
 const path = require("path");
 const { EventEmitter } = require("events");
 
-const VERSION = "5.13.67";
+const VERSION = "5.13.68";
 const PORT = Number(process.env.PORT || 8099);
 const DATA_DIR = process.env.DATA_DIR || "/data";
 const ACCOUNTS_DIR = path.join(DATA_DIR, "accounts");
