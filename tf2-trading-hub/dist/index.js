@@ -11,7 +11,7 @@ const { EventEmitter } = require('events');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const VERSION  = '5.13.63';
+const VERSION  = '5.13.59';
 const PORT     = Number(process.env.PORT  || 8099);
 const DATA_DIR = process.env.DATA_DIR    || '/data';
 
@@ -65,36 +65,13 @@ function getOptions() { return readJson(P.options, {}); }
 
 function loadCreds() { return readJson(P.creds, {}); }
 
-function normalizeCredValue(field, value) {
-  if (value === undefined || value === null) return undefined;
-  const v = String(value).trim();
-  if (!v) return undefined;
-
-  // UI placeholders must never become real credentials.
-  const placeholders = new Set(['base64…','base64...','32-char hex','76561198…','76561198...','…','...','••••••••','your_account_name']);
-  if (placeholders.has(v)) return undefined;
-
-  // Basic shape validation prevents accidental lockouts from placeholder/bad TOTP secrets.
-  if ((field === 'shared_secret' || field === 'identity_secret') && !/^[A-Za-z0-9+/=]{20,}$/.test(v)) return undefined;
-  if (field === 'steam_api_key' && !/^[a-fA-F0-9]{32}$/.test(v)) return undefined;
-  if (field === 'steam_id' && !/^7656119[0-9]{10}$/.test(v)) return undefined;
-  return v;
-}
-
 function saveCreds(patch) {
   const cur = loadCreds();
   const next = { ...cur };
   const FIELDS = ['username','password','shared_secret','identity_secret',
                   'steam_api_key','bptf_token','steam_id'];
-
-  const clear = Array.isArray(patch.clear_fields) ? patch.clear_fields : [];
-  for (const f of clear) {
-    if (FIELDS.includes(f)) delete next[f];
-  }
-
   for (const f of FIELDS) {
-    const v = normalizeCredValue(f, patch[f]);
-    if (v !== undefined) next[f] = v;
+    if (patch[f] !== undefined && patch[f] !== '') next[f] = patch[f];
   }
   writeJson(P.creds, next);
   return next;
@@ -117,7 +94,7 @@ function credStatus() {
 // ─── Bot state ────────────────────────────────────────────────────────────────
 
 const bot = {
-  status:      'offline',   // offline | connecting | online | error | needs_2fa | throttled
+  status:      'offline',   // offline | connecting | online | error | needs_2fa
   loginError:  null,
   steamId:     null,
   displayName: null,
@@ -135,38 +112,6 @@ let client    = null;
 let community = null;
 let manager   = null;
 let reconnectTimer = null;
-let pendingSteamGuard = null; // { callback, requestedAt, lastCodeWrong }
-let loginBackoffUntil = 0;
-
-function steamGuardStatus() {
-  return {
-    required:       !!pendingSteamGuard || bot.status === 'needs_2fa',
-    mode:           pendingSteamGuard?.mode || (bot.status === 'needs_2fa' ? 'prelogin' : null),
-    last_code_wrong: !!pendingSteamGuard?.lastCodeWrong,
-    requested_at:    pendingSteamGuard?.requestedAt || null,
-  };
-}
-
-function isThrottleError(err) {
-  const msg = String(err?.message || err || '');
-  const er  = String(err?.eresult || '');
-  return /AccountLoginDeniedThrottle|LogonSessionReplaced|RateLimitExceeded|Too many login failures|throttle/i.test(msg)
-    || /84|AccountLoginDeniedThrottle/i.test(er);
-}
-
-function setLoginThrottle(minutes = 60) {
-  loginBackoffUntil = Date.now() + minutes * 60 * 1000;
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  }
-  pendingSteamGuard = null;
-  bot.status = 'throttled';
-  bot.loginError = `Steam temporarily blocked login attempts. Stop clicking Connect and wait until ${new Date(loginBackoffUntil).toLocaleTimeString()}.`;
-  log('error', 'steam_login_throttled', { until: new Date(loginBackoffUntil).toISOString(), minutes });
-  bus.emit('status');
-  try { client?.logOff?.(); } catch { /* ignore */ }
-}
 
 // ─── HTTP helpers ─────────────────────────────────────────────────────────────
 
@@ -309,7 +254,6 @@ function buildSteamClients() {
   // ── Client events ──────────────────────────────────────────────────────────
 
   client.on('loggedOn', () => {
-    pendingSteamGuard = null;
     bot.status     = 'online';
     bot.steamId    = client.steamID?.getSteamID64();
     bot.loginError = null;
@@ -344,31 +288,17 @@ function buildSteamClients() {
     const c = loadCreds();
     if (c.shared_secret) {
       const code = SteamTotp.generateAuthCode(c.shared_secret);
-      pendingSteamGuard = null;
       log('info', 'steamguard_totp_generated', {});
       callback(code);
     } else {
-      pendingSteamGuard = {
-        mode: 'callback',
-        callback,
-        requestedAt: new Date().toISOString(),
-        lastCodeWrong: !!lastCodeWrong,
-      };
       bot.status     = 'needs_2fa';
-      bot.loginError = lastCodeWrong
-        ? 'Steam Guard code was rejected. Enter a fresh code from your phone.'
-        : 'Steam Guard required. Enter the current code from your phone.';
-      log('warn', 'steamguard_code_required', { lastCodeWrong: !!lastCodeWrong });
+      bot.loginError = 'Steam Guard required. Set shared_secret in credentials.';
+      log('warn', 'steamguard_no_secret', {});
       bus.emit('status');
     }
   });
 
   client.on('error', err => {
-    pendingSteamGuard = null;
-    if (isThrottleError(err)) {
-      setLoginThrottle(60);
-      return;
-    }
     bot.status     = 'error';
     bot.loginError = err.message;
     log('error', 'steam_client_error', { message: err.message, eresult: err.eresult });
@@ -377,11 +307,10 @@ function buildSteamClients() {
   });
 
   client.on('disconnected', (eresult, msg) => {
-    pendingSteamGuard = null;
-    if (bot.status !== 'throttled') bot.status = 'offline';
+    bot.status = 'offline';
     log('warn', 'steam_disconnected', { eresult, msg });
     bus.emit('status');
-    if (bot.status !== 'throttled') scheduleReconnect();
+    scheduleReconnect();
   });
 
   // ── Manager events ─────────────────────────────────────────────────────────
@@ -420,7 +349,6 @@ function buildSteamClients() {
 }
 
 function scheduleReconnect(delayMs = 30000) {
-  if (loginBackoffUntil && Date.now() < loginBackoffUntil) return;
   if (reconnectTimer) return;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
@@ -428,35 +356,13 @@ function scheduleReconnect(delayMs = 30000) {
   }, delayMs);
 }
 
-async function tryLogin(manualCode = null) {
-  if (loginBackoffUntil && Date.now() < loginBackoffUntil) {
-    bot.status = 'throttled';
-    bot.loginError = `Steam login is temporarily throttled. Wait until ${new Date(loginBackoffUntil).toLocaleTimeString()} before connecting again.`;
-    bus.emit('status');
-    return;
-  }
-  if (loginBackoffUntil && Date.now() >= loginBackoffUntil) loginBackoffUntil = 0;
-
+async function tryLogin() {
   const c = loadCreds();
   if (!c.username || !c.password) {
     log('info', 'login_skipped_no_credentials', {});
     return;
   }
   if (bot.status === 'online' || bot.status === 'connecting') return;
-
-  const cleanManualCode = manualCode ? String(manualCode).trim().toUpperCase().replace(/\s+/g, '') : null;
-  if (!c.shared_secret && !cleanManualCode) {
-    pendingSteamGuard = {
-      mode: 'prelogin',
-      requestedAt: new Date().toISOString(),
-      lastCodeWrong: false,
-    };
-    bot.status = 'needs_2fa';
-    bot.loginError = 'Steam Guard required. Open the Steam mobile app manually, show the current Steam Guard code, and enter it here. Steam may not send a push notification for this login method.';
-    log('warn', 'steamguard_prelogin_code_required', {});
-    bus.emit('status');
-    return;
-  }
 
   // Tear down old clients
   if (client) {
@@ -466,19 +372,15 @@ async function tryLogin(manualCode = null) {
     manager   = null;
   }
 
-  pendingSteamGuard = null;
   bot.status     = 'connecting';
   bot.loginError = null;
-  log('info', 'steam_login_attempt', { username: c.username, manual_code: !!cleanManualCode });
+  log('info', 'steam_login_attempt', { username: c.username });
   bus.emit('status');
 
   buildSteamClients();
 
   const loginOptions = { accountName: c.username, password: c.password };
-  if (cleanManualCode) {
-    loginOptions.twoFactorCode = cleanManualCode;
-    log('info', 'steamguard_manual_code_used_for_login', {});
-  } else if (c.shared_secret) {
+  if (c.shared_secret) {
     loginOptions.twoFactorCode = SteamTotp.generateAuthCode(c.shared_secret);
   }
   client.logOn(loginOptions);
@@ -565,8 +467,6 @@ app.get('/api/status', (req, res) => {
     steam_id:        bot.steamId,
     display_name:    bot.displayName,
     login_error:     bot.loginError,
-    throttle_until:  loginBackoffUntil ? new Date(loginBackoffUntil).toISOString() : null,
-    steam_guard:     steamGuardStatus(),
     offer_queue:     bot.offerQueue.length,
     listing_count:   bot.listings.length,
     inventory_count: bot.inventory.length,
@@ -593,61 +493,6 @@ app.post('/api/credentials', wrap(async (req, res) => {
   }
   res.json({ ok: true, ...credStatus() });
 }));
-
-app.post('/api/credentials/clear-secrets', wrap(async (_req, res) => {
-  saveCreds({ clear_fields: ['shared_secret', 'identity_secret'] });
-  pendingSteamGuard = null;
-  log('warn', 'steam_secrets_cleared', {});
-  res.json({ ok: true, ...credStatus() });
-}));
-
-// ── Manual Steam Guard code ──────────────────────────────────────────────────
-
-app.get('/api/steamguard/status', (_req, res) => {
-  res.json({ ok: true, ...steamGuardStatus() });
-});
-
-app.post('/api/steamguard/code', wrap(async (req, res) => {
-  const code = String(req.body?.code || '').trim().toUpperCase().replace(/\s+/g, '');
-  if (!/^[A-Z0-9]{5,8}$/.test(code)) {
-    return res.status(400).json({ ok: false, error: 'Enter the current Steam Guard code from your phone.' });
-  }
-
-  // Preferred mobile-app flow: collect the code first, then start Steam login with twoFactorCode.
-  if (pendingSteamGuard?.mode === 'prelogin' || bot.status === 'needs_2fa') {
-    pendingSteamGuard = null;
-    bot.status = 'offline';
-    bot.loginError = null;
-    log('info', 'steamguard_manual_code_submitted', { mode: 'prelogin' });
-    bus.emit('status');
-    await tryLogin(code);
-    return res.json({ ok: true, status: bot.status });
-  }
-
-  // Fallback for steam-user callback-based Steam Guard prompts.
-  if (pendingSteamGuard?.callback) {
-    const callback = pendingSteamGuard.callback;
-    pendingSteamGuard = null;
-    bot.status = 'connecting';
-    bot.loginError = null;
-    log('info', 'steamguard_manual_code_submitted', { mode: 'callback' });
-    bus.emit('status');
-    callback(code);
-    return res.json({ ok: true, status: bot.status });
-  }
-
-  return res.status(409).json({ ok: false, error: 'Steam Guard code is not required right now. Click Connect first.' });
-}));
-
-app.post('/api/steamguard/cancel', (_req, res) => {
-  pendingSteamGuard = null;
-  if (client) try { client.logOff(); } catch { /* ignore */ }
-  bot.status = 'offline';
-  bot.loginError = 'Steam Guard login cancelled.';
-  log('warn', 'steamguard_login_cancelled', {});
-  bus.emit('status');
-  res.json({ ok: true, status: bot.status });
-});
 
 // ── Trade offers ─────────────────────────────────────────────────────────────
 
@@ -732,7 +577,6 @@ app.post('/api/bot/login', wrap(async (req, res) => {
 }));
 
 app.post('/api/bot/disconnect', (_req, res) => {
-  pendingSteamGuard = null;
   if (client) try { client.logOff(); } catch { /* ignore */ }
   bot.status = 'offline';
   bus.emit('status');
@@ -794,7 +638,6 @@ app.get('/api/diagnostics/bundle', (_req, res) => {
     version: VERSION,
     status: bot.status,
     login_error: bot.loginError,
-    steam_guard: steamGuardStatus(),
     credentials: credStatus(),
     offer_queue: bot.offerQueue.length,
     listing_count: bot.listings.length,
@@ -817,7 +660,6 @@ app.get('/api/diagnostics', (_req, res) => {
     version:        VERSION,
     status:         bot.status,
     login_error:    bot.loginError,
-    steam_guard:    steamGuardStatus(),
     credentials:    credStatus(),
     offer_queue:    bot.offerQueue.length,
     listing_count:  bot.listings.length,

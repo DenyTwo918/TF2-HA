@@ -1,19 +1,11 @@
 # TF2 Trading Hub
 
-Current build: **5.13.63 – Manual Steam Guard pre-login fix**.
+Current build: **5.13.59 – Crash-safe Steam bot rework**.
 
 A Home Assistant add-on for TF2 trade monitoring, manual trade review, backpack.tf listings, and Steam inventory visibility. This version replaces the previous large single-file runtime with a smaller Express-based server using Steam bot libraries inspired by TF2Autobot/tf2-express patterns.
 
-## What changed in 5.13.63
+## What changed in 5.13.59
 
-- Manual Steam Guard code can now be entered before Steam login starts.
-- Fixed missing throttle helper functions that could create unhandled errors after Steam client failures.
-- Clarified that Steam mobile login may not show a push notification; use the current Steam Guard code from the app.
-
-- Added throttle protection for `AccountLoginDeniedThrottle` so the add-on stops retrying after Steam temporarily blocks login attempts.
-- Added a dashboard button to clear stored `shared_secret` and `identity_secret` for manual phone-code login mode.
-- Prevented placeholder values such as `base64…` or `32-char hex` from being saved as real credentials.
-- Kept manual Steam Guard code entry from the Home Assistant dashboard when no `shared_secret` is saved.
 - Real Steam runtime foundation with `steam-user`, `steamcommunity`, `steam-tradeoffer-manager`, and `steam-totp`.
 - Event-driven trade offer queue with manual accept/decline actions.
 - Cleaner dashboard for status, credentials, pending offers, backpack.tf listings, inventory, and events.
@@ -30,7 +22,7 @@ Live trade actions are still manual from the dashboard. The add-on does not auto
 
 1. Home Assistant → Settings → Add-ons → Add-on Store → menu (⋮) → Repositories.
 2. Add: `https://github.com/DenyTwo918/TF2-HA`.
-3. Install or update **TF2 Trading Hub** to **5.13.63**.
+3. Install or update **TF2 Trading Hub** to **5.13.59**.
 4. Rebuild/start the add-on and check logs for `server_ready`.
 
 ## Setup credentials
@@ -38,7 +30,7 @@ Live trade actions are still manual from the dashboard. The add-on does not auto
 Open the add-on UI through Ingress and fill in:
 
 - Steam username and password.
-- Steam shared secret for fully automatic 2FA TOTP, or leave it empty and enter the current mobile Steam Guard code when prompted.
+- Steam shared secret for 2FA TOTP.
 - Steam identity secret for mobile confirmations, if you want confirmation checker support.
 - Steam Web API key and SteamID64.
 - backpack.tf token for listing and price sync.

@@ -9,7 +9,7 @@
 <body>
   <header>
     <div class="header-inner">
-      <h1>TF2 Trading Hub <span class="version" id="version">5.13.63</span></h1>
+      <h1>TF2 Trading Hub <span class="version" id="version">5.13.59</span></h1>
       <div class="status-badge" id="statusBadge">connecting…</div>
     </div>
   </header>
@@ -20,17 +20,6 @@
     <section id="setupBanner" class="card warn hidden">
       <h2>Setup required</h2>
       <p>Enter your Steam credentials below to start the bot.</p>
-    </section>
-
-    <section id="steamGuardCard" class="card guard hidden">
-      <h2>Steam Guard required</h2>
-      <p>Steam will usually not show a push notification here. Open the Steam mobile app manually, go to Steam Guard, tap/show the current code, and enter it below.</p>
-      <form id="steamGuardForm" class="guard-form">
-        <input type="text" name="code" inputmode="text" autocomplete="one-time-code" maxlength="8" placeholder="Steam Guard code">
-        <button type="submit" class="primary">Submit code</button>
-        <button type="button" id="btnCancelSteamGuard">Cancel login</button>
-      </form>
-      <p class="save-status hidden" id="steamGuardStatus"></p>
     </section>
 
     <!-- Status row -->
@@ -93,25 +82,24 @@
           <label>Steam password
             <input type="password" name="password" autocomplete="new-password" placeholder="••••••••">
           </label>
-          <label>Shared secret (2FA, optional)
-            <input type="password" name="shared_secret" autocomplete="off" placeholder="optional — leave empty for phone code">
+          <label>Shared secret (2FA)
+            <input type="text" name="shared_secret" autocomplete="off" placeholder="base64…">
           </label>
           <label>Identity secret (confirmations)
-            <input type="password" name="identity_secret" autocomplete="off" placeholder="optional — confirmations only">
+            <input type="text" name="identity_secret" autocomplete="off" placeholder="base64…">
           </label>
           <label>Steam Web API key
-            <input type="password" name="steam_api_key" autocomplete="off" placeholder="32-char hex">
+            <input type="text" name="steam_api_key" autocomplete="off" placeholder="32-char hex">
           </label>
           <label>Steam ID64
             <input type="text" name="steam_id" autocomplete="off" placeholder="76561198…">
           </label>
           <label class="full">Backpack.tf token
-            <input type="password" name="bptf_token" autocomplete="off" placeholder="…">
+            <input type="text" name="bptf_token" autocomplete="off" placeholder="…">
           </label>
         </div>
         <div class="btn-row">
           <button type="submit" class="primary">Save credentials</button>
-          <button type="button" id="btnClearSecrets" class="danger subtle">Clear Steam 2FA secrets</button>
         </div>
         <p class="save-status hidden" id="credsSaveStatus"></p>
       </form>
