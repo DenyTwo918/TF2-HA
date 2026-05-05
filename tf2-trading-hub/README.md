@@ -1,6 +1,6 @@
 # TF2 Trading Hub
 
-Current build: **5.13.57 – Minimal UI + Controlled Fill One**.
+Current build: **5.13.58 – Repair HA visibility + addon type fix**.
 
 The main dashboard is intentionally minimal. Use **Maintain now** for the safe minimal provider check, and **Fill 1 listing** when you want one controlled guarded Backpack.tf publish. Legacy/debug panels are kept in Advanced.
 
