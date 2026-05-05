@@ -5,8 +5,8 @@ build_from:
   armhf: ghcr.io/home-assistant/armhf-base:latest
   i386: ghcr.io/home-assistant/i386-base:latest
 args:
-  BUILD_VERSION: "5.13.58"
+  BUILD_VERSION: "5.13.59"
 labels:
   org.opencontainers.image.title: "TF2 Trading Hub"
-  org.opencontainers.image.version: "5.13.58"
+  org.opencontainers.image.version: "5.13.59"
   org.opencontainers.image.source: "https://github.com/DenyTwo918/TF2-HA"
