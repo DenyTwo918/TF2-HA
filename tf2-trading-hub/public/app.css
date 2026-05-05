@@ -137,3 +137,12 @@ body.simple-ui .productionActions{display:grid;grid-template-columns:repeat(4,mi
 
 /* 5.12.76 live dashboard auto refresh */
 .liveDashboardStatus{display:flex;align-items:center;gap:10px;margin:0 0 12px;padding:10px 12px;border:1px solid rgba(56,189,248,.22);border-radius:16px;background:rgba(14,165,233,.07);color:#b8c8db;font-size:.92rem}.liveDashboardStatus .dot{width:9px;height:9px;border-radius:999px;background:#22c55e;box-shadow:0 0 0 5px rgba(34,197,94,.12)}.liveDashboardStatus.warn .dot{background:#f59e0b;box-shadow:0 0 0 5px rgba(245,158,11,.12)}.liveDashboardStatus.bad .dot{background:#ef4444;box-shadow:0 0 0 5px rgba(239,68,68,.12)}.liveDashboardStatus strong{color:#e8f0fb}.bigStatusPill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;border:1px solid rgba(148,163,184,.24);padding:12px 22px;font-weight:950}.bigStatusPill.ok{background:rgba(34,197,94,.14);color:#bbf7d0;border-color:rgba(34,197,94,.34)}.bigStatusPill.warn{background:rgba(245,158,11,.12);color:#fde68a;border-color:rgba(245,158,11,.32)}
+
+/* 5.13.57: Minimal UI mode. Keep the main dashboard small and move noisy modules to Advanced. */
+body.simple-ui .productionGrid .productionMetric:nth-child(n+5){display:none!important}
+body.simple-ui .productionDashboardSection .miniRow:not(#publishWizardInlineStatus){display:none!important}
+body.simple-ui #runStartupArchiveNow,
+body.simple-ui #runStartupRebuildNow,
+body.simple-ui #wizardRunAutoSellNow{display:none!important}
+body.simple-ui .productionActions{grid-template-columns:repeat(4,minmax(0,1fr))}
+body.simple-ui .productionActions #wizardFillOneListing{font-weight:900}

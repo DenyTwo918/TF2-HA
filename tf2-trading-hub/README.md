@@ -1,4 +1,9 @@
-# TF2 Trading Hub — 5.12.56 Guarded Publish Executor Self-Test
+# TF2 Trading Hub
+
+Current build: **5.13.57 – Minimal UI + Controlled Fill One**.
+
+The main dashboard is intentionally minimal. Use **Maintain now** for the safe minimal provider check, and **Fill 1 listing** when you want one controlled guarded Backpack.tf publish. Legacy/debug panels are kept in Advanced.
+
 
 A safe, local-first TF2 trading cockpit for Home Assistant.
 No automatic trade accepting. No automatic Steam Guard confirmation. No automatic Backpack.tf writes.

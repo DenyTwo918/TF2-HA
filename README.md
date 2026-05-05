@@ -1,14 +1,7 @@
-# TF2 HA
+# TF2-HA
 
-Home Assistant add-on repository snapshot.
+Current TF2 Trading Hub build: 5.13.57 – Minimal UI + Controlled Fill One.
 
-Current TF2 Trading Hub build: 5.13.56 – Fix Maintain now crash (event-loop block after provider sync).
+Repository contains the TF2 Trading Hub Home Assistant add-on and optional SDA Bridge helper.
 
-## 5.13.42 – Price Schema Deep Sync Fix
-
-Separates Backpack.tf access token from Backpack.tf API key, exposes both fields in the main UI, and blocks false “prices ready” state when the price schema is empty.
-
-
-## 5.13.42
-
-TF2 Trading Hub provider readiness full ZIP.
+Safety defaults remain guarded/manual: no live trade accepts, no Steam confirmations, no unsafe automatic publishing.

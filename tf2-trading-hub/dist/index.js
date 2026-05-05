@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const APP_VERSION = '5.13.56';
+const APP_VERSION = '5.13.57';
 const APP_NAME = 'TF2 Trading Hub';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -1961,7 +1961,7 @@ function getOptions() {
     backpack_tf_enabled: bool(options.backpack_tf_enabled, true),
     backpack_tf_access_token: String(credentialAccount.backpack_tf_access_token || options.backpack_tf_access_token || '').trim(),
     backpack_tf_api_key: String(credentialAccount.backpack_tf_api_key || options.backpack_tf_api_key || '').trim(),
-    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.56').trim(),
+    backpack_tf_user_agent: String(options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.57').trim(),
     backpack_tf_base_url: String(options.backpack_tf_base_url || 'https://backpack.tf').replace(/\/$/, ''),
     backpack_tf_cache_ttl_minutes: clamp(options.backpack_tf_cache_ttl_minutes, 30, 1, 1440),
     backpack_tf_retry_count: clamp(options.backpack_tf_retry_count, 2, 0, 5),
@@ -1981,6 +1981,9 @@ function getOptions() {
     startup_rebuild_normal_batch_size: clamp(options.startup_rebuild_normal_batch_size, 20, 1, 120),
     startup_rebuild_max_runs: clamp(options.startup_rebuild_max_runs, 3, 1, 20),
     persistent_classifieds_maintainer_enabled: runtimeMaintainerEnabled(bool(options.persistent_classifieds_maintainer_enabled, true)),
+    persistent_classifieds_maintainer_auto_run_enabled: bool(options.persistent_classifieds_maintainer_auto_run_enabled, false),
+    persistent_classifieds_maintainer_safe_minimal_mode_enabled: bool(options.persistent_classifieds_maintainer_safe_minimal_mode_enabled, true),
+    controlled_fill_one_enabled: bool(options.controlled_fill_one_enabled, true),
     persistent_classifieds_interval_minutes: clamp(options.persistent_classifieds_interval_minutes, 5, 1, 1440),
     persistent_classifieds_max_publishes_per_cycle: clamp(options.persistent_classifieds_max_publishes_per_cycle, 80, 1, 120),
     fast_dashboard_status_enabled: bool(options.fast_dashboard_status_enabled, true),
@@ -3634,7 +3637,7 @@ class BackpackTfV2ListingManager {
     return configured.endsWith('/api') ? configured : `${configured}/api`;
   }
   headers(authMode = 'token') {
-    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.56' };
+    const headers = { accept: 'application/json', 'user-agent': this.options.backpack_tf_user_agent || 'TF2-HA-TF2-Trading-Hub/5.13.57' };
     if (authMode === 'token' && this.options.backpack_tf_access_token) headers['X-Auth-Token'] = this.options.backpack_tf_access_token;
     if (authMode === 'bearer' && this.options.backpack_tf_access_token) headers.authorization = `Bearer ${this.options.backpack_tf_access_token}`;
     if (authMode === 'api_key_header' && this.options.backpack_tf_api_key) headers['x-api-key'] = this.options.backpack_tf_api_key;
@@ -5057,7 +5060,7 @@ class PlanningQueueService {
     const eligible = items.filter(x => x.local_status === 'planned' || x.local_status === 'needs_review');
     eligible.sort((a, b) => (b.score || 0) - (a.score || 0));
     const toApprove = eligible.slice(0, Math.min(n, 5));
-    for (const item of boostedToApprove) {
+    for (const item of toApprove) {
       const idx = items.findIndex(x => x.id === item.id);
       if (idx !== -1) items[idx] = { ...items[idx], local_status: 'approved_local', updated_at: new Date().toISOString() };
     }
@@ -8307,7 +8310,7 @@ class SteamInventorySyncService {
       let accepted = null;
       let lastFailure = null;
       for (const variant of this.inventoryUrls(options.steam_id64, startAssetId)) {
-        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.56' } });
+        const result = await fetchJsonHardened('steam_inventory', variant.url, options, { headers: { accept: 'application/json', 'user-agent': 'TF2-HA-TF2-Trading-Hub/5.13.57' } });
         const body = result.body || {};
         const parsed = result.ok ? this.extractInventoryPayload(body) : { ok: false, error: result.error || body.error || body.raw || `HTTP ${result.status}` };
         attempts.push({
@@ -12047,15 +12050,15 @@ class PersistentClassifiedsMaintainerService {
 
       // 5.13.56: yield before heavy post-sync work to prevent SIGKILL from HA supervisor
       await yieldToEventLoop();
-        // SAFE_MINIMAL_MAINTAINER_5_13_56
-        const __safeMinimalMaintainerEnabled_5_13_56 = (typeof options === 'undefined' || !options || options.persistent_classifieds_maintainer_safe_minimal_mode_enabled !== false);
-        if (__safeMinimalMaintainerEnabled_5_13_56) {
-          const __safeMinimalReason_5_13_56 = (typeof reason !== 'undefined' && reason) ? reason : 'unknown';
+        // SAFE_MINIMAL_MAINTAINER_5_13_57
+        const __safeMinimalMaintainerEnabled_5_13_57 = (typeof options === 'undefined' || !options || options.persistent_classifieds_maintainer_safe_minimal_mode_enabled !== false);
+        if (__safeMinimalMaintainerEnabled_5_13_57) {
+          const __safeMinimalReason_5_13_57 = (typeof reason !== 'undefined' && reason) ? reason : 'unknown';
           try {
             if (typeof runtimeLogger !== 'undefined' && runtimeLogger && runtimeLogger.info) {
-              runtimeLogger.info('maintainer', 'maintainer_minimal_mode_enabled', 'Safe minimal maintainer mode enabled after provider sync', { reason: __safeMinimalReason_5_13_56, mode: 'safe_minimal' });
-              runtimeLogger.info('maintainer', 'maintainer_legacy_steps_skipped', 'Legacy post-sync maintainer steps skipped by Safe Minimal Maintainer mode', { reason: __safeMinimalReason_5_13_56 });
-              runtimeLogger.info('maintainer', 'maintainer_minimal_completed', 'Safe minimal maintainer completed after provider sync', { reason: __safeMinimalReason_5_13_56 });
+              runtimeLogger.info('maintainer', 'maintainer_minimal_mode_enabled', 'Safe minimal maintainer mode enabled after provider sync', { reason: __safeMinimalReason_5_13_57, mode: 'safe_minimal' });
+              runtimeLogger.info('maintainer', 'maintainer_legacy_steps_skipped', 'Legacy post-sync maintainer steps skipped by Safe Minimal Maintainer mode', { reason: __safeMinimalReason_5_13_57 });
+              runtimeLogger.info('maintainer', 'maintainer_minimal_completed', 'Safe minimal maintainer completed after provider sync', { reason: __safeMinimalReason_5_13_57 });
             }
           } catch (_) {}
           result.safe_minimal_mode = true;
@@ -12063,8 +12066,9 @@ class PersistentClassifiedsMaintainerService {
           result.steps.push({ stage: 'safe_minimal_legacy_steps', ok: true, skipped: true, reason: 'safe_minimal_mode' });
           result.completed_at = new Date().toISOString();
           result.ok = result.ok !== false;
-          return result;
-        }throwIfOperationAborted(context && context.signal, 'maintainer_before_stale_guard');
+          return saveRun(result);
+        }
+      throwIfOperationAborted(context && context.signal, 'maintainer_before_stale_guard');
       // 5.13.29: stale sell listings (sell listing exists but owned asset is gone)
       // should not keep the account dirty forever.  Archive only when guarded
       // Backpack.tf write sliders are enabled; never touch Steam trades.
@@ -12213,7 +12217,7 @@ class PersistentClassifiedsMaintainerService {
           // fallback_boost_approved=120 but only the first few toApprove items
           // were actually written back to the planning queue, so cap-fill could
           // stay around 25-32 active listings.
-          for (const item of boostedToApprove) {
+          for (const item of toApprove) {
             const idx = items.findIndex(x => x.id === item.id);
             if (idx !== -1) {
               items[idx] = { ...items[idx], local_status: 'approved_local', updated_at: now, maintainer_auto_approved: true, fallback_boost_auto_approved: !toApprove.some(x => x.id === item.id) };
@@ -12550,7 +12554,157 @@ const auditService = new TradeOfferAuditService(AUDIT_PATH);
 const notificationService = new TradeOfferNotificationService(auditService);
 const reviewService = new SteamTradeOfferReviewService({ auditService, notificationService });
 const hubAutopilot = new HubAutopilotPipelineService(auditService, reviewService);
+
 const classifiedsMaintainer = new PersistentClassifiedsMaintainerService(auditService);
+
+async function runControlledFillOne(auditService, reason = 'manual_controlled_fill_one') {
+  const startedAt = new Date().toISOString();
+  const baseOptions = getOptions();
+  const options = {
+    ...baseOptions,
+    // 5.13.57: one-click, one-listing mode. Keep it tiny and safe.
+    persistent_classifieds_maintainer_safe_minimal_mode_enabled: false,
+    persistent_classifieds_max_publishes_per_cycle: 1,
+    maintainer_publish_batch_hard_cap: 1,
+    adaptive_fill_controller_enabled: false,
+    adaptive_fill_target_per_cycle: 1,
+    adaptive_fill_max_per_cycle: 1,
+    startup_rebuild_batch_size: 1,
+    startup_rebuild_normal_batch_size: 1,
+    market_scanner_max_candidates: Math.min(Number(baseOptions.market_scanner_max_candidates || 50), 50),
+    fallback_fill_boost_max_approved_per_run: 5,
+    fallback_fill_publish_target_per_cycle: 1,
+    maintainer_prune_unactionable_buy_drafts: false,
+    maintainer_sell_first_priority_enabled: false,
+    maintainer_sell_first_publish_owned_before_buy: false,
+    auto_sell_owned_inventory_above_min_ref_enabled: false,
+    manual_owned_sell_detector_publish: false,
+    stale_sell_listing_guard_auto_archive_enabled: false,
+    allow_live_trade_accepts: false,
+    allow_sda_trade_confirmations: false,
+    sda_auto_confirm: false,
+    steamguard_auto_confirm: false
+  };
+  const result = {
+    ok: true,
+    version: APP_VERSION,
+    reason,
+    started_at: startedAt,
+    mode: 'controlled_fill_one',
+    max_publishes: 1,
+    steps: [],
+    published: [],
+    skipped: [],
+    errors: []
+  };
+  try {
+    if (!baseOptions.controlled_fill_one_enabled) {
+      result.ok = false;
+      result.disabled = true;
+      result.message = 'Controlled Fill One is disabled in options.';
+      result.completed_at = new Date().toISOString();
+      return result;
+    }
+    if (!runtimeMaintainerEnabled(baseOptions.persistent_classifieds_maintainer_enabled)) {
+      result.ok = false;
+      result.maintainer_off = true;
+      result.message = 'Maintainer is OFF. Enable the Maintainer toggle before Fill 1 listing.';
+      result.completed_at = new Date().toISOString();
+      return result;
+    }
+    if (!classifiedsMaintainer.enabled(options)) {
+      result.ok = false;
+      result.maintainer_off = true;
+      result.message = 'Backpack publishing safety sliders are not enabled. Fill 1 listing did not run.';
+      result.safety = {
+        allow_guarded_backpack_publish: Boolean(options.allow_guarded_backpack_publish),
+        allow_live_classifieds_writes: Boolean(options.allow_live_classifieds_writes),
+        backpack_tf_write_mode: options.backpack_tf_write_mode,
+        global_kill_switch: Boolean(options.global_kill_switch)
+      };
+      result.completed_at = new Date().toISOString();
+      return result;
+    }
+
+    await yieldToEventLoop();
+    const sync = await withStageTimeout('controlled_fill_one_provider_sync', 12000, () => new BackpackTfV2ListingManager(options, auditService).syncListings(false));
+    result.steps.push({ stage: 'provider_sync_cached', ok: Boolean(sync && sync.ok), cached: Boolean(sync && sync.cached), listings: Number(sync && (sync.listings_count || (Array.isArray(sync.listings) ? sync.listings.length : 0)) || 0), error: sync && sync.error || null });
+    if (sync && sync.ok === false) {
+      result.ok = false;
+      result.errors.push({ stage: 'provider_sync_cached', error: sync.error || 'provider sync failed' });
+      result.completed_at = new Date().toISOString();
+      return result;
+    }
+
+    await yieldToEventLoop();
+    const queue = new PlanningQueueService(auditService);
+    let q = queue.current();
+    if (!Array.isArray(q.items) || q.items.length === 0) {
+      q = queue.rebuild('controlled_fill_one');
+      result.steps.push({ stage: 'planning_queue_rebuild', ok: Boolean(q && q.ok), items: Array.isArray(q.items) ? q.items.length : 0 });
+    } else {
+      result.steps.push({ stage: 'planning_queue_existing', ok: true, items: q.items.length });
+    }
+    const eligibleBefore = Array.isArray(q.items) ? q.items.filter(x => ['approved_local', 'planned', 'needs_review'].includes(String(x.local_status || ''))).length : 0;
+    if (!(Array.isArray(q.items) && q.items.some(x => x.local_status === 'approved_local'))) {
+      const approved = queue.bulkApproveTop(1);
+      result.steps.push({ stage: 'planning_queue_approve_one', ok: Boolean(approved && approved.ok), approved: Number(approved && approved.approved || 0) });
+    }
+
+    await yieldToEventLoop();
+    const draftService = new HubListingDraftService(auditService);
+    const built = draftService.buildFromApproved('controlled_fill_one');
+    const drafts = Array.isArray(built.drafts) ? built.drafts : [];
+    let draft = drafts.find(d => d && d.local_status === 'approved_local') || drafts.find(d => d && d.local_status === 'draft') || drafts[0];
+    result.steps.push({ stage: 'build_one_draft', ok: Boolean(built && built.ok !== false), drafts: drafts.length, candidate_draft_id: draft && draft.draft_id || null, eligible_before: eligibleBefore });
+    if (!draft || !draft.draft_id) {
+      result.ok = false;
+      result.skipped.push({ reason: 'no_candidate_draft', message: 'No approved/planned candidate was available for Fill 1 listing.' });
+      result.completed_at = new Date().toISOString();
+      return result;
+    }
+    if (draft.local_status !== 'approved_local') {
+      const approval = draftService.approveDraft(draft.draft_id);
+      result.steps.push({ stage: 'approve_one_draft', ok: Boolean(approval && approval.ok), draft_id: draft.draft_id });
+      if (approval && approval.draft) draft = approval.draft;
+    }
+
+    await yieldToEventLoop();
+    const duplicate = buildDuplicateListingGuard(draft, options);
+    result.steps.push({ stage: 'duplicate_guard', ok: Boolean(duplicate && duplicate.ok !== false), duplicate: Boolean(duplicate && (duplicate.duplicate || duplicate.listed || duplicate.blocked)), draft_id: draft.draft_id });
+    if (duplicate && (duplicate.duplicate || duplicate.listed || duplicate.blocked)) {
+      result.ok = true;
+      result.skipped.push({ draft_id: draft.draft_id, item_name: draft.item_name || null, reason: 'duplicate_guard', duplicate });
+      result.completed_at = new Date().toISOString();
+      return result;
+    }
+
+    await yieldToEventLoop();
+    const publish = await withStageTimeout('controlled_fill_one_publish', 30000, () => draftService.publishGuarded(draft.draft_id, options, { confirm: true, maintainer: true, controlled_fill_one: true }));
+    result.steps.push({ stage: 'publish_one_guarded', ok: Boolean(publish && publish.ok), draft_id: draft.draft_id, item_name: publish && publish.item_name || draft.item_name || null, code: publish && publish.code || null, provider_status: publish && publish.provider_status || null, http_status: publish && publish.provider_http_status || null, provider_request_sent: publish ? publish.provider_request_sent !== false : false });
+    if (publish && publish.ok) {
+      result.published.push({ draft_id: draft.draft_id, item_name: publish.item_name || draft.item_name || null, listing_id: publish.published_listing_id || null, url: publish.published_listing_url || null, status: publish.published_listing_status || null });
+      result.message = 'Fill 1 listing completed.';
+    } else {
+      result.ok = false;
+      result.errors.push({ stage: 'publish_one_guarded', draft_id: draft.draft_id, item_name: draft.item_name || null, code: publish && publish.code || 'publish_failed', message: publish && (publish.friendly_message || publish.error || publish.provider_response_summary) || 'Publish failed.' });
+    }
+    result.completed_at = new Date().toISOString();
+    result.elapsed_ms = Date.parse(result.completed_at) - Date.parse(startedAt);
+    try { auditService.write(result.ok ? 'controlled_fill_one_completed' : 'controlled_fill_one_failed', { ok: result.ok, published: result.published.length, errors: result.errors.length, elapsed_ms: result.elapsed_ms }); } catch {}
+    try { appendActionFeed(result.ok ? 'controlled_fill_one_completed' : 'controlled_fill_one_failed', { published: result.published.length, errors: result.errors.length, elapsed_ms: result.elapsed_ms }); } catch {}
+    return result;
+  } catch (error) {
+    result.ok = false;
+    result.error = safeError(error);
+    result.completed_at = new Date().toISOString();
+    result.elapsed_ms = Date.parse(result.completed_at) - Date.parse(startedAt);
+    try { auditService.write('controlled_fill_one_exception', { error: result.error, elapsed_ms: result.elapsed_ms }); } catch {}
+    try { appendActionFeed('controlled_fill_one_exception', { error: result.error, elapsed_ms: result.elapsed_ms }); } catch {}
+    return result;
+  }
+}
+
 function audit(type, payload = {}) { return auditService.write(type, payload); }
 
 
@@ -13240,7 +13394,7 @@ async function handleApi(req, res, pathname) {
       ok: true,
       app: APP_NAME,
       version: APP_VERSION,
-      scope: '5.13.56 – Backpack Price Schema Memory Cache',
+      scope: '5.13.57 – Minimal UI + Controlled Fill One',
       mode: 'operations_cockpit_notifications_persistence_listing_engine_targeted_orders_multi_account_strategy_ollama',
       steam_web_api_key_saved: Boolean(options.steam_web_api_key),
       steam_web_api_key: redacted(options.steam_web_api_key),
@@ -14143,6 +14297,18 @@ async function handleApi(req, res, pathname) {
     return json(res, 200, { ok: true, version: APP_VERSION, enabled: Boolean(enabled), runtime_controls: controls, maintainer: classifiedsMaintainer.status() });
   }
   if (pathname === '/api/classifieds-maintainer/status') return json(res, 200, classifiedsMaintainer.status());
+  if (pathname === '/api/classifieds-maintainer/fill-one' && (req.method === 'POST' || req.method === 'GET')) {
+    try { releaseStaleOperationIfNeeded('controlled_fill_one_start'); } catch {}
+    if (activeOperationBusy()) {
+      const busy = operationBusyPayload('classifieds_maintainer', 'manual_controlled_fill_one');
+      runtimeLogger.info('maintainer', 'controlled_fill_one_skipped_busy', 'Fill 1 listing skipped: operation already running', { activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs });
+      try { audit('controlled_fill_one_skipped_busy', { activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs }); } catch {}
+      try { appendActionFeed('controlled_fill_one_skipped_busy', { activeOperationType: busy.activeOperationType, activeOperationAgeMs: busy.activeOperationAgeMs }); } catch {}
+      return json(res, 202, busy);
+    }
+    const result = await runExclusiveOperation('classifieds_maintainer', 'manual_controlled_fill_one', async () => runControlledFillOne(auditService, 'manual_controlled_fill_one'), { timeoutMs: 60000 });
+    return json(res, result.busy ? 202 : 200, result.result || result);
+  }
   if (pathname === '/api/classifieds-maintainer/run' && (req.method === 'POST' || req.method === 'GET')) {
     // 5.13.29: Home Assistant ingress can return 502 Bad Gateway when a long
     // maintainer run keeps the HTTP request open while Backpack.tf calls are
