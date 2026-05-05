@@ -1,6 +1,6 @@
 # TF2-HA
 
-Current TF2 Trading Hub build: 5.13.57 – Minimal UI + Controlled Fill One.
+Current TF2 Trading Hub build: 5.13.57 - Minimal UI + Controlled Fill One.
 
 Repository contains the TF2 Trading Hub Home Assistant add-on and optional SDA Bridge helper.
 

@@ -1,4 +1,3 @@
-# Legacy file kept only for older Supervisor versions. Current Home Assistant Supervisor builds from Dockerfile directly.
 build_from:
   amd64: ghcr.io/home-assistant/amd64-base:latest
   aarch64: ghcr.io/home-assistant/aarch64-base:latest
@@ -7,3 +6,7 @@ build_from:
   i386: ghcr.io/home-assistant/i386-base:latest
 args:
   BUILD_VERSION: "5.13.57"
+labels:
+  org.opencontainers.image.title: "TF2 Trading Hub"
+  org.opencontainers.image.version: "5.13.57"
+  org.opencontainers.image.source: "https://github.com/DenyTwo918/TF2-HA"

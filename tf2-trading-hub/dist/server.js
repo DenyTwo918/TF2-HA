@@ -22,7 +22,7 @@ const PROVIDER_STATE_PATH = path.join(DATA_DIR, 'steam-companion-provider-state.
 const BACKPACK_LISTINGS_PATH = path.join(DATA_DIR, 'steam-companion-backpack-listings.json');
 const BACKPACK_PRICE_SCHEMA_PATH = path.join(DATA_DIR, 'tf2-hub-backpack-price-schema.json');
 const BACKPACK_PRICE_SCHEMA_DEBUG_PATH = path.join(DATA_DIR, 'tf2-hub-backpack-price-schema-debug.json');
-// 5.13.56: in-memory price schema cache – parse once, serve from memory, avoid repeated blocking JSON.parse of 45k+ entries
+// 5.13.57: in-memory price schema cache – parse once, serve from memory, avoid repeated blocking JSON.parse of 45k+ entries
 let __priceSchemaCache = null;
 let __priceSchemaCacheTTL = 0;
 const STEAM_ITEM_SCHEMA_PATH = path.join(DATA_DIR, 'tf2-hub-steam-item-schema.json');
@@ -299,7 +299,7 @@ function writeJsonIfChanged(filePath, value) {
   __notifyWatchers(filePath);
   return true;
 }
-// 5.13.56: price schema memory cache helpers – prevents repeated blocking JSON.parse of 45k+ entries
+// 5.13.57: price schema memory cache helpers – prevents repeated blocking JSON.parse of 45k+ entries
 function readPriceSchemaJson(defaultVal = { ok: false, prices: [] }) {
   if (__priceSchemaCache && Date.now() < __priceSchemaCacheTTL) return __priceSchemaCache;
   const data = readJson(BACKPACK_PRICE_SCHEMA_PATH, defaultVal);
@@ -441,7 +441,7 @@ function runtimeLogVaultStatus(action, status = {}, extra = {}) {
 }
 
 
-// ── 5.13.56 – Operation single-flight coordinator ────────────────────────
+// ── 5.13.57 – Operation single-flight coordinator ────────────────────────
 let __activeOperation = null;
 let __providerSyncFlight = null;
 let __drainingOperation = null;
@@ -449,7 +449,7 @@ const OPERATION_DEFAULT_TIMEOUT_MS = 90000;
 const HEAVY_OPERATION_TYPES = new Set(['provider_sync', 'scheduled_pipeline', 'local_workflow', 'classifieds_maintainer', 'publish_wizard_rebuild', 'market_scanner', 'inventory_sync']);
 function nowIso() { return new Date().toISOString(); }
 
-// ── 5.13.56 – Watchdog helpers ────────────────────────────────────────────
+// ── 5.13.57 – Watchdog helpers ────────────────────────────────────────────
 function getOperationAgeMs() {
   if (!__activeOperation || !__activeOperation.active || !__activeOperation.started_ms) return 0;
   return Date.now() - __activeOperation.started_ms;
@@ -572,7 +572,7 @@ function assertOperationStillAlive(operationId, stage) {
     throw new Error(`operation_timed_out_at_${String(stage || 'unknown')}`);
   }
 }
-// 5.13.56 – Independent 2-second watchdog (not scheduler-dependent)
+// 5.13.57 – Independent 2-second watchdog (not scheduler-dependent)
 let __operationWatchdogInterval = null;
 function startOperationWatchdog() {
   if (__operationWatchdogInterval) return;
@@ -12042,13 +12042,13 @@ class PersistentClassifiedsMaintainerService {
       }
       const listingManager = new BackpackTfV2ListingManager(options, this.audit);
       throwIfOperationAborted(context && context.signal, 'maintainer_before_provider_sync');
-      // 5.13.56: Maintain now must be lightweight. Do not force a fresh Backpack.tf price-schema download/parse.
+      // 5.13.57: Maintain now must be lightweight. Do not force a fresh Backpack.tf price-schema download/parse.
       // A forced provider sync parses ~45k price rows and can trigger HA Supervisor SIGKILL on smaller hosts.
       const sync = await withStageTimeout('maintainer_provider_sync_cached', 12000, () => listingManager.syncListings(false));
       throwIfOperationAborted(context && context.signal, 'maintainer_after_provider_sync');
       result.steps.push({ stage: 'sync_account_listings_cached', ok: Boolean(sync.ok), cached: Boolean(sync.cached), listings: Number(sync.listings_count || 0), error: sync.error || null });
 
-      // 5.13.56: yield before heavy post-sync work to prevent SIGKILL from HA supervisor
+      // 5.13.57: yield before heavy post-sync work to prevent SIGKILL from HA supervisor
       await yieldToEventLoop();
         // SAFE_MINIMAL_MAINTAINER_5_13_57
         const __safeMinimalMaintainerEnabled_5_13_57 = (typeof options === 'undefined' || !options || options.persistent_classifieds_maintainer_safe_minimal_mode_enabled !== false);
@@ -13374,7 +13374,7 @@ async function handleApi(req, res, pathname) {
     try { releaseStaleOperationIfNeeded('status_endpoint'); } catch {}
     const options = getOptions();
     const state = readJson(STATE_PATH, {});
-    // 5.13.56: Fast cached status — no heavy rebuilds, no maintainer.status() call.
+    // 5.13.57: Fast cached status — no heavy rebuilds, no maintainer.status() call.
     // Read the last persisted maintainer state directly from disk (one JSON read, cheap).
     const maintainerFile = readJson(CLASSIFIEDS_MAINTAINER_PATH, { ok: true, enabled: false, running: false });
     const maintainerCached = {
@@ -14217,7 +14217,7 @@ async function handleApi(req, res, pathname) {
   }
   if (pathname === '/api/publish-wizard/prepare-key-to-metal' && (req.method === 'POST' || req.method === 'GET')) return json(res, 200, prepareKeyToMetalDraft(getOptions(), auditService));
   if (pathname === '/api/most-traded/status' || pathname === '/api/offer-booster/status' || pathname === '/api/auto-list-anything/status') return json(res, 200, buildMostTradedAndKeysStatus(getOptions()));
-  // 5.13.56: lite endpoint is always fast; full /status returns cached-only snapshot.
+  // 5.13.57: lite endpoint is always fast; full /status returns cached-only snapshot.
   // Heavy rebuild must be explicitly requested via POST /api/publish-wizard/rebuild.
   if (pathname === '/api/publish-wizard/status/lite') { try { return json(res, 200, buildPublishWizardLiteStatus()); } catch (error) { return json(res, 200, { ok: true, lite: true, version: APP_VERSION, updated_at: new Date().toISOString(), safe_fallback: true, error: safeError(error) }); } }
   if (pathname === '/api/publish-wizard/status') {
@@ -14230,7 +14230,7 @@ async function handleApi(req, res, pathname) {
     return json(res, 200, { ok: true, version: APP_VERSION, updated_at: new Date().toISOString(), cached: false, maintainer_running: __maintainerRunning, operation: operationPublicSnapshot(), active_operation: operationPublicSnapshot(), steps: [], guarded_publish_enabled: Boolean(options.allow_guarded_backpack_publish), live_classifieds_writes_enabled: Boolean(options.allow_live_classifieds_writes), backpack_tf_write_mode: options.backpack_tf_write_mode, publish_disabled_reason: 'Dashboard status not built yet. Click Rebuild to load.', classifieds_maintainer: { ok: true, running: __maintainerRunning, enabled: classifiedsMaintainer.enabled(options), note: 'pre_build_lite' }, auto_sell_relister: { ok: true, note: 'pre_build_lite' }, trade_offer_state_machine: { ok: true, counts: {}, states: [], next_action: 'Status will be available after first rebuild.' } });
   }
   if (pathname === '/api/publish-wizard/rebuild' && (req.method === 'POST' || req.method === 'GET')) {
-    // 5.13.56: Heavy rebuild is single-flight and never overlaps provider/maintainer.
+    // 5.13.57: Heavy rebuild is single-flight and never overlaps provider/maintainer.
     const result = await runExclusiveOperation('publish_wizard_rebuild', 'manual_publish_wizard_rebuild', async () => getCachedPublishWizardStatus(), { timeoutMs: 30000 });
     if (result.busy) return json(res, 202, result);
     if (result.ok && result.result) return json(res, 200, { ...result.result, rebuilt: true, operation: operationPublicSnapshot(), active_operation: operationPublicSnapshot() });
@@ -14315,7 +14315,7 @@ async function handleApi(req, res, pathname) {
     // still in progress.  Start manual runs in the background and return an
     // immediate accepted status.  The live dashboard poll then reads the run
     // result from /api/classifieds-maintainer/status.
-    // 5.13.56: If maintainer is OFF, Maintain now returns a friendly message and does not run the heavy operation.
+    // 5.13.57: If maintainer is OFF, Maintain now returns a friendly message and does not run the heavy operation.
     if (!runtimeMaintainerEnabled(getOptions().persistent_classifieds_maintainer_enabled)) {
       return json(res, 200, { ok: false, version: APP_VERSION, maintainer_off: true, message: 'Maintainer is OFF. Enable the Maintainer toggle on the dashboard before using Maintain now.' });
     }
@@ -14374,7 +14374,7 @@ async function runMaintainerIsolated(reason = 'scheduled_classifieds_maintainer'
     audit('maintainer_skipped_already_running', { reason });
     return { ok: false, skipped: true, reason: 'already_running' };
   }
-  // 5.13.56: Capture the owning operation token at start so we can detect stale continuation.
+  // 5.13.57: Capture the owning operation token at start so we can detect stale continuation.
   const owningOperationId = context.operationId || (__activeOperation && __activeOperation.id) || null;
   function isMaintainerOperationStillActive() {
     if (!owningOperationId) return true;
@@ -14437,7 +14437,7 @@ async function runMaintainerIsolated(reason = 'scheduled_classifieds_maintainer'
       __lastMaintainerTimeoutAt = Date.now();
       try { audit('maintainer_timeout_released_lock', { reason, elapsed_ms: elapsed, error: errSafe, owningOperationId }); } catch {}
       try { appendActionFeed('maintainer_timeout_released_lock', { reason, elapsed_ms: elapsed, error: errSafe, owningOperationId }); } catch {}
-      // 5.13.56: Hard release the lock if the operation is still held (e.g. event-loop delay caused Promise.race to be late).
+      // 5.13.57: Hard release the lock if the operation is still held (e.g. event-loop delay caused Promise.race to be late).
       if (__activeOperation && __activeOperation.active && __activeOperation.id === owningOperationId) {
         try { logOperationEvent('maintainer_timeout_released_lock', { operationId: owningOperationId, elapsed_ms: elapsed, reason: 'hard_release_in_catch' }, 'warn'); } catch {}
         try { __activeOperation.abort_controller && __activeOperation.abort_controller.abort(); } catch {}
@@ -14475,7 +14475,7 @@ function startScheduler() {
     runtimeLogger.info('scheduler', 'scheduler_tick_started', 'Scheduler tick started', { uptime_seconds: Math.round(process.uptime()) });
     Promise.resolve().then(async () => {
       try {
-        // 5.13.56: preflight watchdog — release stale locks before scheduling any job.
+        // 5.13.57: preflight watchdog — release stale locks before scheduling any job.
         try { releaseStaleOperationIfNeeded('scheduler_preflight'); } catch {}
         let heavyJobRanThisTick = false;
         if (hubAutopilot.due()) {
@@ -14492,9 +14492,9 @@ function startScheduler() {
             }
           }
         }
-        // 5.13.56: second preflight — in case scheduled_pipeline just released the lock via timeout.
+        // 5.13.57: second preflight — in case scheduled_pipeline just released the lock via timeout.
         try { releaseStaleOperationIfNeeded('scheduler_preflight_post_pipeline'); } catch {}
-        // 5.13.56: Auto maintainer is disabled by default. Requires explicit opt-in.
+        // 5.13.57: Auto maintainer is disabled by default. Requires explicit opt-in.
         const maintainerAutoRunEnabled = options.persistent_classifieds_maintainer_auto_run_enabled === true;
         if (classifiedsMaintainer.due() && !maintainerAutoRunEnabled) {
           runtimeLogger.info('scheduler', 'maintainer_auto_run_disabled', 'Auto maintainer skipped: persistent_classifieds_maintainer_auto_run_enabled is not true. Use Maintain now manually.', {});

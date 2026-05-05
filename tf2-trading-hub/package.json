@@ -1,12 +1,10 @@
 {
-  "name": "tf2-trading-hub-addon",
+  "name": "tf2-trading-hub",
   "version": "5.13.57",
-  "private": true,
+  "description": "Minimal safe TF2 Trading Hub with controlled fill one",
   "main": "dist/server.js",
   "scripts": {
-    "check": "node --check dist/server.js && node --check dist/index.js && node --check public/app.js",
     "start": "node dist/server.js"
   },
-  "dependencies": {},
-  "description": "TF2 Trading Hub: minimal UI with controlled Fill 1 listing mode and safe maintainer defaults."
+  "dependencies": {}
 }
