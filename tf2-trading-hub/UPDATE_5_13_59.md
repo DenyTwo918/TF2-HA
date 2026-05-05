@@ -1,4 +1,4 @@
-# TF2 Trading Hub 5.13.60 — Crash-safe Steam bot rework
+# TF2 Trading Hub 5.13.59 — Crash-safe Steam bot rework
 
 This release replaces the previous oversized single-file runtime with a smaller, event-driven Home Assistant add-on server inspired by TF2Autobot/tf2-express patterns.
 
@@ -12,7 +12,7 @@ This release replaces the previous oversized single-file runtime with a smaller,
 - Added a clean manual-review dashboard for status, credentials, pending trade offers, backpack.tf listings, inventory, and event logs.
 - Added Server-Sent Events for live dashboard updates, plus polling fallback.
 - Updated Dockerfiles so Home Assistant builds install npm production dependencies correctly.
-- Bumped all HA-visible version markers to `5.13.60`.
+- Bumped all HA-visible version markers to `5.13.59`.
 
 ## Safety defaults
 

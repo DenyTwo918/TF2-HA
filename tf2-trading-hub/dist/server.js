@@ -11,7 +11,7 @@ const { EventEmitter } = require('events');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const VERSION  = '5.13.60';
+const VERSION  = '5.13.61';
 const PORT     = Number(process.env.PORT  || 8099);
 const DATA_DIR = process.env.DATA_DIR    || '/data';
 
@@ -112,6 +112,15 @@ let client    = null;
 let community = null;
 let manager   = null;
 let reconnectTimer = null;
+let pendingSteamGuard = null; // { callback, requestedAt, lastCodeWrong }
+
+function steamGuardStatus() {
+  return {
+    required:       !!pendingSteamGuard || bot.status === 'needs_2fa',
+    last_code_wrong: !!pendingSteamGuard?.lastCodeWrong,
+    requested_at:    pendingSteamGuard?.requestedAt || null,
+  };
+}
 
 // ─── HTTP helpers ─────────────────────────────────────────────────────────────
 
@@ -254,6 +263,7 @@ function buildSteamClients() {
   // ── Client events ──────────────────────────────────────────────────────────
 
   client.on('loggedOn', () => {
+    pendingSteamGuard = null;
     bot.status     = 'online';
     bot.steamId    = client.steamID?.getSteamID64();
     bot.loginError = null;
@@ -288,17 +298,26 @@ function buildSteamClients() {
     const c = loadCreds();
     if (c.shared_secret) {
       const code = SteamTotp.generateAuthCode(c.shared_secret);
+      pendingSteamGuard = null;
       log('info', 'steamguard_totp_generated', {});
       callback(code);
     } else {
+      pendingSteamGuard = {
+        callback,
+        requestedAt: new Date().toISOString(),
+        lastCodeWrong: !!lastCodeWrong,
+      };
       bot.status     = 'needs_2fa';
-      bot.loginError = 'Steam Guard required. Set shared_secret in credentials.';
-      log('warn', 'steamguard_no_secret', {});
+      bot.loginError = lastCodeWrong
+        ? 'Steam Guard code was rejected. Enter a fresh code from your phone.'
+        : 'Steam Guard required. Enter the current code from your phone.';
+      log('warn', 'steamguard_code_required', { lastCodeWrong: !!lastCodeWrong });
       bus.emit('status');
     }
   });
 
   client.on('error', err => {
+    pendingSteamGuard = null;
     bot.status     = 'error';
     bot.loginError = err.message;
     log('error', 'steam_client_error', { message: err.message, eresult: err.eresult });
@@ -307,6 +326,7 @@ function buildSteamClients() {
   });
 
   client.on('disconnected', (eresult, msg) => {
+    pendingSteamGuard = null;
     bot.status = 'offline';
     log('warn', 'steam_disconnected', { eresult, msg });
     bus.emit('status');
@@ -372,6 +392,7 @@ async function tryLogin() {
     manager   = null;
   }
 
+  pendingSteamGuard = null;
   bot.status     = 'connecting';
   bot.loginError = null;
   log('info', 'steam_login_attempt', { username: c.username });
@@ -467,6 +488,7 @@ app.get('/api/status', (req, res) => {
     steam_id:        bot.steamId,
     display_name:    bot.displayName,
     login_error:     bot.loginError,
+    steam_guard:     steamGuardStatus(),
     offer_queue:     bot.offerQueue.length,
     listing_count:   bot.listings.length,
     inventory_count: bot.inventory.length,
@@ -493,6 +515,40 @@ app.post('/api/credentials', wrap(async (req, res) => {
   }
   res.json({ ok: true, ...credStatus() });
 }));
+
+// ── Manual Steam Guard code ──────────────────────────────────────────────────
+
+app.get('/api/steamguard/status', (_req, res) => {
+  res.json({ ok: true, ...steamGuardStatus() });
+});
+
+app.post('/api/steamguard/code', wrap(async (req, res) => {
+  const code = String(req.body?.code || '').trim().toUpperCase().replace(/\s+/g, '');
+  if (!pendingSteamGuard?.callback) {
+    return res.status(409).json({ ok: false, error: 'Steam Guard code is not required right now.' });
+  }
+  if (!/^[A-Z0-9]{5,8}$/.test(code)) {
+    return res.status(400).json({ ok: false, error: 'Enter the current Steam Guard code from your phone.' });
+  }
+  const callback = pendingSteamGuard.callback;
+  pendingSteamGuard = null;
+  bot.status = 'connecting';
+  bot.loginError = null;
+  log('info', 'steamguard_manual_code_submitted', {});
+  bus.emit('status');
+  callback(code);
+  res.json({ ok: true, status: bot.status });
+}));
+
+app.post('/api/steamguard/cancel', (_req, res) => {
+  pendingSteamGuard = null;
+  if (client) try { client.logOff(); } catch { /* ignore */ }
+  bot.status = 'offline';
+  bot.loginError = 'Steam Guard login cancelled.';
+  log('warn', 'steamguard_login_cancelled', {});
+  bus.emit('status');
+  res.json({ ok: true, status: bot.status });
+});
 
 // ── Trade offers ─────────────────────────────────────────────────────────────
 
@@ -577,6 +633,7 @@ app.post('/api/bot/login', wrap(async (req, res) => {
 }));
 
 app.post('/api/bot/disconnect', (_req, res) => {
+  pendingSteamGuard = null;
   if (client) try { client.logOff(); } catch { /* ignore */ }
   bot.status = 'offline';
   bus.emit('status');
@@ -638,6 +695,7 @@ app.get('/api/diagnostics/bundle', (_req, res) => {
     version: VERSION,
     status: bot.status,
     login_error: bot.loginError,
+    steam_guard: steamGuardStatus(),
     credentials: credStatus(),
     offer_queue: bot.offerQueue.length,
     listing_count: bot.listings.length,
@@ -660,6 +718,7 @@ app.get('/api/diagnostics', (_req, res) => {
     version:        VERSION,
     status:         bot.status,
     login_error:    bot.loginError,
+    steam_guard:    steamGuardStatus(),
     credentials:    credStatus(),
     offer_queue:    bot.offerQueue.length,
     listing_count:  bot.listings.length,
