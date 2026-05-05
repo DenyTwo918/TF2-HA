@@ -9,7 +9,7 @@
 <body>
   <header>
     <div class="header-inner">
-      <h1>TF2 Trading Hub <span class="version" id="version">5.13.62</span></h1>
+      <h1>TF2 Trading Hub <span class="version" id="version">5.13.63</span></h1>
       <div class="status-badge" id="statusBadge">connecting…</div>
     </div>
   </header>
@@ -24,7 +24,7 @@
 
     <section id="steamGuardCard" class="card guard hidden">
       <h2>Steam Guard required</h2>
-      <p>Open Steam app on your phone, go to Steam Guard and enter the current code.</p>
+      <p>Steam will usually not show a push notification here. Open the Steam mobile app manually, go to Steam Guard, tap/show the current code, and enter it below.</p>
       <form id="steamGuardForm" class="guard-form">
         <input type="text" name="code" inputmode="text" autocomplete="one-time-code" maxlength="8" placeholder="Steam Guard code">
         <button type="submit" class="primary">Submit code</button>
@@ -94,10 +94,10 @@
             <input type="password" name="password" autocomplete="new-password" placeholder="••••••••">
           </label>
           <label>Shared secret (2FA, optional)
-            <input type="password" name="shared_secret" autocomplete="off" placeholder="base64…">
+            <input type="password" name="shared_secret" autocomplete="off" placeholder="optional — leave empty for phone code">
           </label>
           <label>Identity secret (confirmations)
-            <input type="password" name="identity_secret" autocomplete="off" placeholder="base64…">
+            <input type="password" name="identity_secret" autocomplete="off" placeholder="optional — confirmations only">
           </label>
           <label>Steam Web API key
             <input type="password" name="steam_api_key" autocomplete="off" placeholder="32-char hex">

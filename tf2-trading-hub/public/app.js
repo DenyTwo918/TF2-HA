@@ -84,7 +84,7 @@ function renderStatus(data) {
   const guardStatus = qs('#steamGuardStatus');
   if (guardStatus) {
     if (guard.last_code_wrong) {
-      guardStatus.textContent = 'Code was rejected. Wait for a fresh code in your phone app and try again.';
+      guardStatus.textContent = 'Code was rejected. Wait for a fresh code in the Steam mobile app and try again. Do not spam Connect.';
       guardStatus.classList.remove('hidden');
     } else {
       guardStatus.classList.add('hidden');
