@@ -11,7 +11,7 @@ const { EventEmitter } = require('events');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const VERSION  = '5.13.60';
+const VERSION  = '5.13.62';
 const PORT     = Number(process.env.PORT  || 8099);
 const DATA_DIR = process.env.DATA_DIR    || '/data';
 
@@ -24,6 +24,8 @@ const P = {
   listings:     path.join(DATA_DIR, 'steam-companion-backpack-listings.json'),
   priceSchema:  path.join(DATA_DIR, 'tf2-hub-backpack-price-schema.json'),
   pollData:     path.join(DATA_DIR, 'steam-tradeoffer-poll.json'),
+  inventory:    path.join(DATA_DIR, 'tf2-hub-inventory-cache.json'),
+  runtime:      path.join(DATA_DIR, 'tf2-hub-runtime-state.json'),
 };
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
@@ -60,6 +62,33 @@ function log(level, event, data = {}) {
 // ─── Options ──────────────────────────────────────────────────────────────────
 
 function getOptions() { return readJson(P.options, {}); }
+
+function loadRuntime() {
+  return readJson(P.runtime, { desired_online: true });
+}
+
+function setDesiredOnline(value, reason = 'manual') {
+  const current = loadRuntime();
+  const next = {
+    ...current,
+    desired_online: Boolean(value),
+    reason,
+    updated_at: new Date().toISOString(),
+  };
+  writeJson(P.runtime, next);
+  return next;
+}
+
+function wantsOnline() {
+  return loadRuntime().desired_online !== false;
+}
+
+function clearReconnectTimer() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
 
 // ─── Credentials ──────────────────────────────────────────────────────────────
 
@@ -100,11 +129,16 @@ const bot = {
   displayName: null,
   offerQueue:  [],          // pending manual review
   listings:    [],
-  inventory:   [],
+  inventory:   readJson(P.inventory, []),
   lastOfferSync:   null,
   lastListingSync: null,
   lastInvSync:     null,
+  lastInvError:    null,
+  invFailureCount: 0,
+  nextInvSyncAfter: null,
+  offerManagerReady: false,
   startedAt:       new Date().toISOString(),
+  desiredOnline:   wantsOnline(),
 };
 
 // Steam client instances (recreated on reconnect)
@@ -208,31 +242,94 @@ async function publishListing(payload) {
 
 // ─── Inventory ────────────────────────────────────────────────────────────────
 
-async function syncInventory() {
+function normalizeInventoryItem(item) {
+  const qualityTag = item.tags?.find(t => t.category === 'Quality');
+  return {
+    assetid:  item.assetid || item.id,
+    classid:  item.classid || null,
+    name:     item.market_hash_name || item.name || 'Unknown',
+    quality:  qualityTag?.localized_tag_name || qualityTag?.name || '',
+    tradable: item.tradable !== false && item.tradable !== 0,
+    amount:   Number(item.amount) || 1,
+  };
+}
+
+function getManagerInventory() {
+  return new Promise((resolve, reject) => {
+    if (!manager || !bot.offerManagerReady) {
+      return reject(new Error('Steam offer manager is not ready yet'));
+    }
+    manager.getInventoryContents(440, '2', true, (err, inventory) => {
+      if (err) return reject(err);
+      resolve(Array.isArray(inventory) ? inventory : []);
+    });
+  });
+}
+
+async function getPublicInventory(steamId) {
+  const url = `https://steamcommunity.com/inventory/${steamId}/440/2?l=english&count=5000`;
+  const data = await apiFetch(url, {}, 20000);
+  const descriptions = new Map((data.descriptions || []).map(d => [`${d.classid}_${d.instanceid}`, d]));
+  return (data.assets || []).map(a => {
+    const desc = descriptions.get(`${a.classid}_${a.instanceid}`) || {};
+    return {
+      assetid:  a.assetid,
+      classid:  a.classid,
+      name:     desc.market_hash_name || desc.name || 'Unknown',
+      quality:  desc.tags?.find(t => t.category === 'Quality')?.localized_tag_name || '',
+      tradable: desc.tradable === 1,
+      amount:   Number(a.amount) || 1,
+    };
+  });
+}
+
+function setInventoryFailure(err) {
+  bot.lastInvError = err.message || String(err);
+  bot.invFailureCount += 1;
+  const delayMinutes = Math.min(30, Math.max(2, bot.invFailureCount * 2));
+  bot.nextInvSyncAfter = new Date(Date.now() + delayMinutes * 60 * 1000).toISOString();
+  log('warn', 'inventory_sync_failed', {
+    error: bot.lastInvError,
+    retry_after: bot.nextInvSyncAfter,
+    failure_count: bot.invFailureCount,
+  });
+}
+
+async function syncInventory({ force = false, throwOnError = false } = {}) {
   const c = loadCreds();
   const steamId = c.steam_id || bot.steamId;
-  if (!steamId) return bot.inventory;
+  if (!steamId) {
+    const err = new Error('No SteamID64 available for inventory sync');
+    setInventoryFailure(err);
+    if (throwOnError) throw err;
+    return bot.inventory;
+  }
+
+  if (!force && bot.nextInvSyncAfter && Date.now() < new Date(bot.nextInvSyncAfter).getTime()) {
+    return bot.inventory;
+  }
+
   try {
-    const url = `https://steamcommunity.com/inventory/${steamId}/440/2?l=english&count=5000`;
-    const data = await apiFetch(url, {}, 20000);
-    const descriptions = new Map(
-      (data.descriptions || []).map(d => [`${d.classid}_${d.instanceid}`, d])
-    );
-    bot.inventory = (data.assets || []).map(a => {
-      const desc = descriptions.get(`${a.classid}_${a.instanceid}`) || {};
-      return {
-        assetid:  a.assetid,
-        classid:  a.classid,
-        name:     desc.name || 'Unknown',
-        quality:  desc.tags?.find(t => t.category === 'Quality')?.localized_tag_name || '',
-        tradable: desc.tradable === 1,
-        amount:   Number(a.amount) || 1,
-      };
-    }).filter(i => i.tradable);
+    let items;
+    let source = 'tradeoffer_manager';
+    try {
+      items = await getManagerInventory();
+    } catch (managerErr) {
+      source = 'public_inventory';
+      log('warn', 'inventory_manager_fetch_failed', { error: managerErr.message });
+      items = await getPublicInventory(steamId);
+    }
+
+    bot.inventory = items.map(normalizeInventoryItem).filter(i => i.tradable);
     bot.lastInvSync = new Date().toISOString();
-    log('info', 'inventory_synced', { count: bot.inventory.length });
+    bot.lastInvError = null;
+    bot.invFailureCount = 0;
+    bot.nextInvSyncAfter = null;
+    writeJson(P.inventory, bot.inventory);
+    log('info', 'inventory_synced', { count: bot.inventory.length, source });
   } catch (err) {
-    log('warn', 'inventory_sync_failed', { error: err.message });
+    setInventoryFailure(err);
+    if (throwOnError) throw err;
   }
   return bot.inventory;
 }
@@ -240,7 +337,7 @@ async function syncInventory() {
 // ─── Steam bot ────────────────────────────────────────────────────────────────
 
 function buildSteamClients() {
-  client    = new SteamUser();
+  client    = new SteamUser({ autoRelogin: false });
   community = new SteamCommunity();
   manager   = new TradeOfferManager({
     steam:        client,
@@ -254,6 +351,7 @@ function buildSteamClients() {
   // ── Client events ──────────────────────────────────────────────────────────
 
   client.on('loggedOn', () => {
+    bot.desiredOnline = true;
     bot.status     = 'online';
     bot.steamId    = client.steamID?.getSteamID64();
     bot.loginError = null;
@@ -273,7 +371,10 @@ function buildSteamClients() {
 
   client.on('webSession', (_sessionId, cookies) => {
     manager.setCookies(cookies, err => {
+      bot.offerManagerReady = !err;
       if (err) log('warn', 'manager_set_cookies_failed', { error: err.message });
+      else log('info', 'offer_manager_ready', {});
+      bus.emit('status');
     });
     community.setCookies(cookies);
     const c = loadCreds();
@@ -303,14 +404,16 @@ function buildSteamClients() {
     bot.loginError = err.message;
     log('error', 'steam_client_error', { message: err.message, eresult: err.eresult });
     bus.emit('status');
-    scheduleReconnect();
+    if (wantsOnline()) scheduleReconnect();
   });
 
   client.on('disconnected', (eresult, msg) => {
     bot.status = 'offline';
-    log('warn', 'steam_disconnected', { eresult, msg });
+    bot.offerManagerReady = false;
+    const desired = wantsOnline();
+    log(desired ? 'warn' : 'info', desired ? 'steam_disconnected' : 'steam_manual_disconnect_complete', { eresult, msg });
     bus.emit('status');
-    scheduleReconnect();
+    if (desired) scheduleReconnect();
   });
 
   // ── Manager events ─────────────────────────────────────────────────────────
@@ -349,6 +452,10 @@ function buildSteamClients() {
 }
 
 function scheduleReconnect(delayMs = 30000) {
+  if (!wantsOnline()) {
+    clearReconnectTimer();
+    return;
+  }
   if (reconnectTimer) return;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
@@ -357,6 +464,8 @@ function scheduleReconnect(delayMs = 30000) {
 }
 
 async function tryLogin() {
+  setDesiredOnline(true, 'login_requested');
+  bot.desiredOnline = true;
   const c = loadCreds();
   if (!c.username || !c.password) {
     log('info', 'login_skipped_no_credentials', {});
@@ -364,12 +473,17 @@ async function tryLogin() {
   }
   if (bot.status === 'online' || bot.status === 'connecting') return;
 
+  clearReconnectTimer();
+
   // Tear down old clients
   if (client) {
+    try { client.autoRelogin = false; } catch { /* ignore */ }
+    try { client.gamesPlayed([]); } catch { /* ignore */ }
     try { client.logOff(); } catch { /* ignore */ }
     client    = null;
     community = null;
     manager   = null;
+    bot.offerManagerReady = false;
   }
 
   bot.status     = 'connecting';
@@ -384,6 +498,36 @@ async function tryLogin() {
     loginOptions.twoFactorCode = SteamTotp.generateAuthCode(c.shared_secret);
   }
   client.logOn(loginOptions);
+}
+
+
+function stopBot(reason = 'manual_disconnect') {
+  setDesiredOnline(false, reason);
+  bot.desiredOnline = false;
+  clearReconnectTimer();
+
+  if (community) {
+    try { community.stopConfirmationChecker(); } catch { /* optional API */ }
+  }
+  if (manager) {
+    try { manager.shutdown(); } catch { /* optional API */ }
+    try { manager.pollInterval = -1; } catch { /* optional API */ }
+  }
+  if (client) {
+    try { client.autoRelogin = false; } catch { /* optional API */ }
+    try { client.gamesPlayed([]); } catch { /* ignore */ }
+    try { client.setPersona(SteamUser.EPersonaState.Offline); } catch { /* ignore */ }
+    try { client.logOff(); } catch { /* ignore */ }
+  }
+
+  client = null;
+  community = null;
+  manager = null;
+  bot.offerManagerReady = false;
+  bot.status = 'offline';
+  bot.loginError = null;
+  log('info', 'bot_disconnect_requested', { reason });
+  bus.emit('status');
 }
 
 // ─── Offer actions ────────────────────────────────────────────────────────────
@@ -441,7 +585,7 @@ async function schedulerTick() {
       await syncListings().catch(e => log('warn', 'tick_listings_error', { error: e.message }));
     }
     if (!bot.lastInvSync || now - new Date(bot.lastInvSync).getTime() > INV_TTL) {
-      await syncInventory().catch(e => log('warn', 'tick_inventory_error', { error: e.message }));
+      await syncInventory({ force: false }).catch(e => log('warn', 'tick_inventory_error', { error: e.message }));
     }
   } finally {
     tickRunning = false;
@@ -470,10 +614,14 @@ app.get('/api/status', (req, res) => {
     offer_queue:     bot.offerQueue.length,
     listing_count:   bot.listings.length,
     inventory_count: bot.inventory.length,
+    inventory_error: bot.lastInvError,
+    inventory_retry_after: bot.nextInvSyncAfter,
+    offer_manager_ready: bot.offerManagerReady,
     last_offer_sync: bot.lastOfferSync,
     last_listing_sync: bot.lastListingSync,
     last_inv_sync:   bot.lastInvSync,
     started_at:      bot.startedAt,
+    desired_online:  wantsOnline(),
     credentials:     credStatus(),
   });
 });
@@ -487,8 +635,8 @@ app.get('/api/credentials', (_req, res) => res.json({ ok: true, ...credStatus() 
 app.post('/api/credentials', wrap(async (req, res) => {
   const next = saveCreds(req.body || {});
   log('info', 'credentials_saved', {});
-  // If bot is offline and we now have enough to log in, try
-  if (bot.status === 'offline' || bot.status === 'error') {
+  // If the operator has not manually disconnected the bot, credentials can trigger login.
+  if (wantsOnline() && (bot.status === 'offline' || bot.status === 'error')) {
     tryLogin().catch(() => {});
   }
   res.json({ ok: true, ...credStatus() });
@@ -558,8 +706,19 @@ app.get('/api/inventory', (_req, res) =>
 );
 
 app.post('/api/inventory/sync', wrap(async (req, res) => {
-  await syncInventory();
-  res.json({ ok: true, inventory: bot.inventory, count: bot.inventory.length, last_sync: bot.lastInvSync });
+  try {
+    await syncInventory({ force: true, throwOnError: true });
+    res.json({ ok: true, inventory: bot.inventory, count: bot.inventory.length, last_sync: bot.lastInvSync, error: null });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: err.message,
+      inventory: bot.inventory,
+      count: bot.inventory.length,
+      last_sync: bot.lastInvSync,
+      retry_after: bot.nextInvSyncAfter,
+    });
+  }
 }));
 
 // ── Prices ───────────────────────────────────────────────────────────────────
@@ -577,10 +736,8 @@ app.post('/api/bot/login', wrap(async (req, res) => {
 }));
 
 app.post('/api/bot/disconnect', (_req, res) => {
-  if (client) try { client.logOff(); } catch { /* ignore */ }
-  bot.status = 'offline';
-  bus.emit('status');
-  res.json({ ok: true });
+  stopBot('ui_disconnect');
+  res.json({ ok: true, status: bot.status, desired_online: wantsOnline() });
 });
 
 // ── Events (audit log) ───────────────────────────────────────────────────────
@@ -642,6 +799,8 @@ app.get('/api/diagnostics/bundle', (_req, res) => {
     offer_queue: bot.offerQueue.length,
     listing_count: bot.listings.length,
     inventory_count: bot.inventory.length,
+    inventory_error: bot.lastInvError,
+    inventory_retry_after: bot.nextInvSyncAfter,
     files: {
       audit_exists: fs.existsSync(P.audit),
       poll_data_exists: fs.existsSync(P.pollData),
@@ -664,6 +823,8 @@ app.get('/api/diagnostics', (_req, res) => {
     offer_queue:    bot.offerQueue.length,
     listing_count:  bot.listings.length,
     inventory_count: bot.inventory.length,
+    inventory_error: bot.lastInvError,
+    inventory_retry_after: bot.nextInvSyncAfter,
     started_at:     bot.startedAt,
     uptime_seconds: Math.floor((Date.now() - new Date(bot.startedAt)) / 1000),
     node_version:   process.version,
@@ -691,7 +852,14 @@ async function main() {
   });
   process.on('SIGTERM', () => {
     log('info', 'sigterm_received', {});
-    if (client) try { client.logOff(); } catch { /* ignore */ }
+    clearReconnectTimer();
+    if (community) try { community.stopConfirmationChecker(); } catch { /* ignore */ }
+    if (manager) try { manager.shutdown(); } catch { /* ignore */ }
+    if (client) {
+      try { client.autoRelogin = false; } catch { /* ignore */ }
+      try { client.gamesPlayed([]); } catch { /* ignore */ }
+      try { client.logOff(); } catch { /* ignore */ }
+    }
     process.exit(0);
   });
 
@@ -701,8 +869,13 @@ async function main() {
     log('info', 'server_listening', { port: PORT });
   });
 
-  // Try Steam login
-  await tryLogin().catch(err => log('error', 'initial_login_error', { error: err.message }));
+  // Try Steam login only if the last operator state wants the bot online.
+  if (wantsOnline()) {
+    await tryLogin().catch(err => log('error', 'initial_login_error', { error: err.message }));
+  } else {
+    bot.status = 'offline';
+    log('info', 'auto_login_skipped_manual_disconnect', {});
+  }
 
   // Scheduler: tick every 60 s
   setInterval(() => {

@@ -1,6 +1,6 @@
 # TF2-HA
 
-Current TF2 Trading Hub build: 5.13.60 - flashy HA-connected cockpit UI.
+Current TF2 Trading Hub build: 5.13.62 - reliable manual disconnect fix.
 
 Repository contains the TF2 Trading Hub Home Assistant add-on and optional SDA Bridge helper.
 

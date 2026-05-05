@@ -1,16 +1,20 @@
 # TF2 Trading Hub
 
-Current build: **5.13.60 – Flashy HA-connected cockpit UI**.
+Current build: **5.13.62 – Reliable manual disconnect fix**.
 
-A Home Assistant add-on for TF2 trade monitoring, manual trade review, backpack.tf listings, and Steam inventory visibility. This version replaces the previous large single-file runtime with a smaller Express-based server using Steam bot libraries inspired by TF2Autobot/tf2-express patterns.
+A Home Assistant add-on for TF2 trade monitoring, manual trade review, backpack.tf listings, and Steam inventory visibility. This build keeps the flashy HA-connected cockpit UI and the smaller Express-based Steam runtime.
 
-## What changed in 5.13.60
+## What changed in 5.13.62
 
-- Flashier Home Assistant-connected cockpit UI with sidebar navigation, animated hero/status area, runtime health bars, premium metric cards, improved offer cards, inventory tiles, and a polished live event stream.
-- Ingress remains enabled for the Home Assistant sidebar.
-- Direct Web UI access is also available on port `8099` for debugging and full-page use.
-- Existing crash-safe Express backend and Steam bot endpoints are preserved.
-- All HA-visible version markers were bumped to `5.13.60` so Home Assistant can detect the update.
+- The **Disconnect** button now performs a real manual stop instead of only changing the UI state.
+- Manual disconnect persists to `/data/tf2-hub-runtime-state.json` as `desired_online: false`.
+- Auto-reconnect is blocked after a manual disconnect until the operator presses **Connect** again.
+- Steam game presence is cleared with `gamesPlayed([])` before logoff, so TF2 should no longer stay shown as active after disconnect.
+- Confirmation checker, trade manager and reconnect timers are stopped during manual disconnect.
+- `/api/status` now exposes `desired_online` for the cockpit UI.
+- The UI disables Connect/Disconnect controls more accurately based on runtime state.
+- Ingress and optional direct Web UI access on port `8099` remain enabled.
+- All HA-visible version markers were bumped to `5.13.62` so Home Assistant can detect the update.
 
 ## Safety defaults
 
@@ -20,7 +24,7 @@ Live trade actions are still manual from the dashboard. The add-on does not auto
 
 1. Home Assistant → Settings → Add-ons → Add-on Store → menu (⋮) → Repositories.
 2. Add: `https://github.com/DenyTwo918/TF2-HA`.
-3. Install or update **TF2 Trading Hub** to **5.13.60**.
+3. Install or update **TF2 Trading Hub** to **5.13.62**.
 4. Rebuild/start the add-on and check logs for `server_ready`.
 
 ## Setup credentials
@@ -37,7 +41,8 @@ Credentials are stored under `/data` in the add-on data directory.
 
 ## Dashboard workflow
 
-- **Connect bot** starts the Steam bot login.
+- **Connect** starts the Steam bot login and re-enables desired online state.
+- **Disconnect** stops reconnect timers, clears game presence, logs off Steam and keeps the bot offline until manually connected again.
 - **Refresh cockpit** reloads runtime status, offers, listings, inventory, and event stream.
 - **Sync offers** refreshes TradeOfferManager polling.
 - **Incoming offers** shows trade offers as review cards with accept/decline controls.

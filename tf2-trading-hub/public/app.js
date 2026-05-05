@@ -73,8 +73,14 @@ function renderStatus(data) {
     statusPill.className = `pill ${cls}`;
   }
 
-  const version = data.version || '5.13.60';
+  const version = data.version || '5.13.62';
   setText('sideVersion', version);
+
+  const connectBtn = qs('#btnLogin');
+  const disconnectBtn = qs('#btnDisconnect');
+  const onlineish = ['online', 'connecting', 'needs_2fa'].includes(data.status);
+  if (connectBtn) connectBtn.disabled = data.status === 'online' || data.status === 'connecting';
+  if (disconnectBtn) disconnectBtn.disabled = !onlineish && data.desired_online === false;
 
   const c = data.credentials || {};
   const steamLabel = data.display_name || data.username || data.steam_id || c.username || 'Not connected';
@@ -84,16 +90,21 @@ function renderStatus(data) {
   setText('statListings', data.listing_count ?? 0);
   setText('statInventory', data.inventory_count ?? 0);
   setText('statListingSync', fmtTime(data.last_listing_sync));
-  setText('statInventorySync', fmtTime(data.last_inv_sync));
+  if (data.inventory_error) {
+    const retry = data.inventory_retry_after ? ` · retry ${fmtTime(data.inventory_retry_after).replace('Synced ', '')}` : '';
+    setText('statInventorySync', `Inventory error: ${data.inventory_error}${retry}`);
+  } else {
+    setText('statInventorySync', fmtTime(data.last_inv_sync));
+  }
 
   const hasOffers = Number(data.offer_queue || 0) > 0;
   const hasListings = Number(data.listing_count || 0) > 0;
   const hasInventory = Number(data.inventory_count || 0) > 0;
   const online = data.status === 'online';
   setHealthBar('barSteam', online ? 100 : data.status === 'connecting' ? 45 : 14);
-  setHealthBar('barOffers', hasOffers ? 88 : online ? 50 : 20);
+  setHealthBar('barOffers', data.offer_manager_ready ? 92 : hasOffers ? 88 : online ? 50 : 20);
   setHealthBar('barBackpack', hasListings ? 90 : c.has_bptf_token ? 42 : 16);
-  setHealthBar('barInventory', hasInventory ? 92 : c.steam_id || data.steam_id ? 38 : 14);
+  setHealthBar('barInventory', data.inventory_error ? 18 : hasInventory ? 92 : c.steam_id || data.steam_id ? 38 : 14);
 
   const errEl = qs('#loginError');
   if (errEl) {
@@ -308,6 +319,7 @@ async function syncInventory(button) {
     addLog('info', `Inventory synced: ${data.count ?? 0} tradable items`);
   } catch (err) {
     addLog('error', `Inventory sync failed: ${err.message}`);
+    await loadStatus().catch(() => {});
   } finally {
     setBusy(button, false);
   }

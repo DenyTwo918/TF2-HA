@@ -1,14 +1,20 @@
-# TF2 Trading Hub 5.13.63 - Steam Login Throttle Guard
+# TF2 Trading Hub 5.13.62 — Reliable manual disconnect fix
 
-## Fixes
+This patch fixes the cockpit Disconnect button so it actually stops the Steam bot and prevents the automatic reconnect loop from immediately bringing TF2 back online.
 
-- Adds a throttle-safe login state for `AccountLoginDeniedThrottle`.
-- Stops automatic reconnect loops after Steam temporarily blocks login attempts.
-- Adds a one-hour retry guard so the add-on does not make the throttle worse.
-- Adds a dashboard button to clear stored `shared_secret` and `identity_secret`.
-- Prevents placeholder values such as `base64…` or `32-char hex` from being saved as real credentials.
-- Keeps manual Steam Guard phone-code login available when `shared_secret` is empty.
+## Fixed
 
-## Why
+- Added persistent runtime desired state in `/data/tf2-hub-runtime-state.json`.
+- `/api/bot/disconnect` now calls a central `stopBot()` shutdown path.
+- Manual disconnect clears reconnect timers and blocks reconnect scheduling.
+- SteamUser is created with `autoRelogin: false`.
+- Disconnect clears game presence with `gamesPlayed([])` before `logOff()`.
+- Trade manager and confirmation checker are stopped when available.
+- Startup respects the last manual disconnect state and skips auto-login until Connect is pressed.
+- Credential save no longer auto-starts the bot if the operator manually disconnected it.
+- `/api/status` now includes `desired_online`.
+- Cockpit buttons now better reflect online/offline state.
 
-Steam may temporarily throttle login attempts after repeated failed password/2FA attempts. Previous builds could retry too eagerly and keep the account in a throttled state. This build stops retries and shows a clear wait message in the UI.
+## Notes
+
+Connect restores `desired_online: true` and starts Steam login again. SIGTERM/add-on stop still performs graceful cleanup without changing the stored operator preference.
