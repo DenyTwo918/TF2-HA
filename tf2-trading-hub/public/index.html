@@ -18,45 +18,41 @@
         <div class="brand-mark">TF2</div>
         <div>
           <strong>Trading Hub</strong>
-          <span id="sideVersion">5.13.67</span>
+          <span id="sideVersion">5.13.64</span>
         </div>
       </div>
 
       <nav class="nav-list">
-        <a href="#dashboard"     class="nav-link active">Dashboard</a>
-        <a href="#accounts"      class="nav-link">Accounts</a>
-        <a href="#offers"        class="nav-link">Trade offers</a>
-        <a href="#listings"      class="nav-link">Listings</a>
-        <a href="#drafts"        class="nav-link">Listing drafts</a>
-        <a href="#inventory"     class="nav-link">Inventory</a>
-        <a href="#pricing"       class="nav-link">Pricing</a>
-        <a href="#autonomous"    class="nav-link">Autonomous</a>
-        <a href="#credentials"   class="nav-link">Credentials</a>
-        <a href="#events"        class="nav-link">Events</a>
+        <a href="#dashboard" class="nav-link active">Dashboard</a>
+        <a href="#offers" class="nav-link">Trade offers</a>
+        <a href="#listings" class="nav-link">Listings</a>
+        <a href="#inventory" class="nav-link">Inventory</a>
+        <a href="#credentials" class="nav-link">Credentials</a>
+        <a href="#events" class="nav-link">Events</a>
       </nav>
 
       <div class="ha-card">
         <span class="ha-dot"></span>
         <div>
           <strong>Home Assistant connected</strong>
-          <p>Ingress + optional direct port 8099.</p>
+          <p>Runs through Ingress and optional direct Web UI port.</p>
         </div>
       </div>
     </aside>
 
     <main class="content">
-      <!-- ── Dashboard ─────────────────────────────────────────────────────── -->
       <section id="dashboard" class="hero card">
         <div class="hero-copy">
-          <div class="eyebrow">Autonomous multi-account cockpit</div>
+          <div class="eyebrow">Crash-safe Steam bot cockpit</div>
           <h1>TF2 Trading Hub</h1>
-          <p>Monitor Steam sessions, Backpack.tf listings, incoming offers, listing drafts and inventory health from one Home Assistant dashboard.</p>
+          <p>Monitor Steam state, Backpack.tf listings, incoming offers and inventory health from one Home Assistant connected dashboard.</p>
           <div class="hero-actions">
-            <button id="btnLogin"      class="btn btn-primary">Connect bot</button>
+            <button id="btnLogin" class="btn btn-primary">Connect bot</button>
             <button id="btnDisconnect" class="btn btn-ghost">Disconnect</button>
             <button id="btnRefreshAll" class="btn btn-ghost">Refresh cockpit</button>
           </div>
         </div>
+
         <div class="hero-status">
           <div id="statusBadge" class="status-badge connecting">connecting…</div>
           <div class="orbit" aria-hidden="true">
@@ -69,17 +65,9 @@
       <section id="setupBanner" class="setup-banner hidden">
         <div>
           <strong>Setup required</strong>
-          <p>Save Steam credentials first. Dry-run mode is active by default — no live actions until explicitly enabled.</p>
+          <p>Save Steam credentials first. The bot will stay safe and manual-review focused until live actions are explicitly enabled.</p>
         </div>
         <a href="#credentials" class="btn btn-warning">Open credentials</a>
-      </section>
-
-      <section id="dryRunBanner" class="setup-banner warn hidden">
-        <div>
-          <strong>Dry-run mode active</strong>
-          <p>Publish and trade-accept actions will be simulated. Enable live mode in Autonomous settings to perform real actions.</p>
-        </div>
-        <a href="#autonomous" class="btn btn-warning">Autonomous settings</a>
       </section>
 
       <section class="metric-grid" aria-label="Runtime metrics">
@@ -103,16 +91,6 @@
           <strong id="statInventory">—</strong>
           <small id="statInventorySync">Not synced</small>
         </article>
-        <article class="metric-card">
-          <span>Listing drafts</span>
-          <strong id="statDrafts">—</strong>
-          <small id="statDraftsSub">Not generated</small>
-        </article>
-        <article class="metric-card">
-          <span>Price schema items</span>
-          <strong id="statPriceItems">—</strong>
-          <small id="statPriceStatus">Not loaded</small>
-        </article>
       </section>
 
       <section id="health" class="grid-two">
@@ -128,8 +106,7 @@
           <div class="health-bars">
             <div><span>Steam session</span><i id="barSteam"></i></div>
             <div><span>Offer manager</span><i id="barOffers"></i></div>
-            <div><span>Backpack.tf token</span><i id="barBackpack"></i></div>
-            <div><span>Price schema</span><i id="barPriceSchema"></i></div>
+            <div><span>Backpack.tf</span><i id="barBackpack"></i></div>
             <div><span>Inventory cache</span><i id="barInventory"></i></div>
           </div>
         </article>
@@ -142,48 +119,15 @@
             </div>
           </div>
           <div class="command-grid">
-            <button id="btnSyncOffers"     class="btn btn-ghost">Sync offers</button>
-            <button id="btnSyncListings"   class="btn btn-ghost">Sync listings</button>
-            <button id="btnSyncInventory"  class="btn btn-ghost">Sync inventory</button>
-            <button id="btnGenerateDrafts" class="btn btn-ghost">Generate drafts</button>
-            <button id="btnLoadPrices"     class="btn btn-ghost">Refresh prices</button>
-            <button id="btnDiagBackpack"   class="btn btn-ghost">Backpack diagnostics</button>
-            <button id="btnRunPipeline"    class="btn btn-primary">Run pipeline</button>
+            <button id="btnSyncOffers" class="btn btn-ghost">Sync offers</button>
+            <button id="btnSyncListings" class="btn btn-ghost">Sync listings</button>
+            <button id="btnSyncInventory" class="btn btn-ghost">Sync inventory</button>
+            <button id="btnLoadPrices" class="btn btn-ghost">Refresh prices</button>
+            <button id="btnDiagBackpack" class="btn btn-ghost">Backpack diagnostics</button>
           </div>
         </article>
       </section>
 
-      <!-- ── Accounts ───────────────────────────────────────────────────────── -->
-      <section id="accounts" class="card section-card">
-        <div class="card-head">
-          <div>
-            <p class="eyebrow">Multi-account</p>
-            <h2>Bot accounts</h2>
-          </div>
-          <button id="btnAddAccount" class="btn btn-ghost">Add account</button>
-        </div>
-        <div id="accountList" class="account-list"></div>
-        <form id="addAccountForm" class="hidden" style="margin-top:1rem;">
-          <div class="form-grid">
-            <label>Account ID <input type="text" name="account_id" placeholder="e.g. bot2" required></label>
-            <label>Label <input type="text" name="label" placeholder="Display name"></label>
-            <label>Role
-              <select name="role">
-                <option value="main">Main</option>
-                <option value="trading">Trading</option>
-                <option value="storage">Storage</option>
-                <option value="pricing_only">Pricing only</option>
-              </select>
-            </label>
-          </div>
-          <div class="form-footer">
-            <button type="submit" class="btn btn-primary">Create account</button>
-            <button type="button" id="btnCancelAddAccount" class="btn btn-ghost">Cancel</button>
-          </div>
-        </form>
-      </section>
-
-      <!-- ── Trade Offers ───────────────────────────────────────────────────── -->
       <section id="offers" class="card section-card">
         <div class="card-head">
           <div>
@@ -195,7 +139,6 @@
         <div id="offerList" class="offer-list"></div>
       </section>
 
-      <!-- ── Listings ───────────────────────────────────────────────────────── -->
       <section id="listings" class="card section-card">
         <div class="card-head">
           <div>
@@ -208,22 +151,6 @@
         <div id="listingList" class="listing-list"></div>
       </section>
 
-      <!-- ── Listing Drafts ─────────────────────────────────────────────────── -->
-      <section id="drafts" class="card section-card">
-        <div class="card-head">
-          <div>
-            <p class="eyebrow">Inventory → Backpack.tf</p>
-            <h2>Listing drafts <span class="count" id="draftCount">0</span></h2>
-          </div>
-          <div style="display:flex;gap:.5rem;">
-            <button id="btnGenDraftsTop" class="btn btn-ghost">Generate drafts</button>
-          </div>
-        </div>
-        <div id="draftWarning" class="notice warn hidden"></div>
-        <div id="draftList" class="draft-list"></div>
-      </section>
-
-      <!-- ── Inventory ──────────────────────────────────────────────────────── -->
       <section id="inventory" class="card section-card">
         <div class="card-head">
           <div>
@@ -232,86 +159,10 @@
           </div>
           <button id="btnSyncInventoryTop" class="btn btn-ghost">Sync inventory</button>
         </div>
+        <div id="inventoryPricing" class="diagnostic-panel hidden"></div>
         <div id="inventoryGrid" class="inventory-grid"></div>
       </section>
 
-      <!-- ── Pricing ────────────────────────────────────────────────────────── -->
-      <section id="pricing" class="card section-card">
-        <div class="card-head">
-          <div>
-            <p class="eyebrow">Backpack.tf price schema</p>
-            <h2>Pricing health</h2>
-          </div>
-          <div style="display:flex;gap:.5rem;">
-            <button id="btnRefreshSchema" class="btn btn-ghost">Refresh schema</button>
-          </div>
-        </div>
-        <div id="pricingPanel" class="diagnostic-panel hidden"></div>
-        <div id="pricingDetails" style="margin-top:1rem;">
-          <p class="eyebrow">Price lookup</p>
-          <div style="display:flex;gap:.5rem;margin-top:.5rem;">
-            <input id="priceLookupInput" type="text" placeholder="Item name e.g. Mann Co. Supply Crate Key" style="flex:1;">
-            <button id="btnPriceLookup" class="btn btn-ghost">Lookup</button>
-          </div>
-          <div id="priceLookupResult" style="margin-top:.75rem;font-family:monospace;font-size:.85rem;"></div>
-        </div>
-      </section>
-
-      <!-- ── Autonomous settings ────────────────────────────────────────────── -->
-      <section id="autonomous" class="card section-card">
-        <div class="card-head">
-          <div>
-            <p class="eyebrow">Safety-first automation</p>
-            <h2>Autonomous mode</h2>
-          </div>
-          <span class="pill warn">Dry-run default</span>
-        </div>
-        <div id="autonomousWarning" class="notice warn" style="margin-bottom:1rem;">
-          <strong>Default: safe / dry-run.</strong> All autonomous actions are simulated until you explicitly enable live mode below.
-        </div>
-        <form id="autonomousForm">
-          <div class="form-grid">
-            <label class="checkbox-label">
-              <input type="checkbox" name="dry_run" checked>
-              Dry-run mode (simulate — don't publish or accept for real)
-            </label>
-            <label class="checkbox-label">
-              <input type="checkbox" name="autonomous_publish_enabled">
-              Autonomous listing publish (up to cap per cycle)
-            </label>
-            <label class="checkbox-label">
-              <input type="checkbox" name="autonomous_trade_accept_enabled">
-              Autonomous trade accept (safe offers only)
-            </label>
-            <label class="checkbox-label">
-              <input type="checkbox" name="require_price_confidence" checked>
-              Require price confidence before publishing
-            </label>
-            <label class="checkbox-label">
-              <input type="checkbox" name="allow_unpriced_items">
-              Allow publishing unpriced items
-            </label>
-            <label>Max publish per cycle
-              <input type="number" name="max_publish_per_cycle" value="5" min="0" max="100">
-            </label>
-            <label>Max trade-accept per cycle
-              <input type="number" name="max_trade_accept_per_cycle" value="3" min="0" max="50">
-            </label>
-            <label>Min profit (ref) to auto-accept
-              <input type="number" name="min_profit_ref" value="0" min="0" step="0.11">
-            </label>
-            <label>Max parallel accounts
-              <input type="number" name="max_parallel_accounts" value="1" min="1" max="32">
-            </label>
-          </div>
-          <div class="form-footer">
-            <button type="submit" class="btn btn-primary">Save autonomous settings</button>
-            <p id="autonomousSaveStatus" class="save-status hidden"></p>
-          </div>
-        </form>
-      </section>
-
-      <!-- ── Credentials ────────────────────────────────────────────────────── -->
       <section id="credentials" class="card section-card">
         <div class="card-head">
           <div>
@@ -320,7 +171,6 @@
           </div>
           <span class="pill safe">Stored in /data</span>
         </div>
-        <div id="credentialsDiag" class="diagnostic-panel hidden" style="margin-bottom:1rem;"></div>
         <form id="credsForm" autocomplete="off">
           <div class="form-grid">
             <label>Steam username
@@ -341,13 +191,8 @@
             <label>Steam ID64
               <input type="text" name="steam_id" autocomplete="off" placeholder="76561198…">
             </label>
-            <label class="full">Backpack.tf access token
-              <input type="text" name="bptf_token" autocomplete="off" placeholder="Access token — for listing/classifieds actions">
-              <small style="color:var(--text-muted,#888);margin-top:.25rem;display:block;">Used for syncing and publishing your Backpack.tf classified listings.</small>
-            </label>
-            <label class="full">Backpack.tf API key
-              <input type="text" name="bptf_api_key" autocomplete="off" placeholder="API key — for price schema fetching">
-              <small style="color:var(--text-muted,#888);margin-top:.25rem;display:block;">Used ONLY for fetching the global price schema (IGetPrices). Different from the access token. Without this, prices will not load.</small>
+            <label class="full">Backpack.tf token
+              <input type="text" name="bptf_token" autocomplete="off" placeholder="Backpack.tf token">
             </label>
           </div>
           <div class="form-footer">
@@ -355,12 +200,8 @@
             <p id="credsSaveStatus" class="save-status hidden"></p>
           </div>
         </form>
-        <div style="margin-top:1.5rem;">
-          <div id="credentialStatus" class="form-grid"></div>
-        </div>
       </section>
 
-      <!-- ── Events ─────────────────────────────────────────────────────────── -->
       <section id="events" class="card section-card">
         <div class="card-head">
           <div>

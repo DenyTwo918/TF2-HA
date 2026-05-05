@@ -1,6 +1,6 @@
 FROM ghcr.io/home-assistant/armhf-base:latest
 
-ARG BUILD_VERSION=5.13.67
+ARG BUILD_VERSION=5.13.64
 ARG BUILD_ARCH=armhf
 
 LABEL io.hass.name="TF2 Trading Hub" \
