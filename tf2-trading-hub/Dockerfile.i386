@@ -1,6 +1,6 @@
 FROM ghcr.io/home-assistant/i386-base:latest
 
-ARG BUILD_VERSION=5.13.64
+ARG BUILD_VERSION=5.13.67
 ARG BUILD_ARCH=i386
 
 LABEL io.hass.name="TF2 Trading Hub" \

@@ -457,3 +457,96 @@ input:focus { border-color: rgba(56, 189, 248, 0.72); box-shadow: 0 0 0 4px rgba
 .diag-tags { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
 .diag-tags span { padding:5px 9px; border-radius:999px; background:rgba(255,255,255,.09); color:rgba(232,239,255,.82); font-size:12px; }
 .inventory-card small { color: rgba(255, 207, 102, .92); font-weight: 700; }
+
+/* 5.13.67 multi-account cockpit additions */
+.select {
+  min-height: 42px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.16);
+  background: rgba(8,12,28,.76);
+  color: #edf4ff;
+  padding: 0 14px;
+  outline: none;
+}
+.account-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+.account-card {
+  position: relative;
+  border: 1px solid rgba(255,255,255,.12);
+  background: linear-gradient(145deg, rgba(18,26,54,.88), rgba(8,12,28,.72));
+  border-radius: 22px;
+  padding: 16px;
+  box-shadow: 0 18px 50px rgba(0,0,0,.24);
+}
+.account-card.selected {
+  border-color: rgba(99, 179, 255, .78);
+  box-shadow: 0 0 0 1px rgba(99,179,255,.18), 0 22px 60px rgba(21,106,255,.2);
+}
+.account-top,
+.account-actions,
+.draft-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.account-actions {
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.muted {
+  color: rgba(237,244,255,.64);
+  font-size: .85rem;
+  margin-top: 4px;
+}
+.mini-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+.mini-grid span {
+  border-radius: 12px;
+  background: rgba(255,255,255,.06);
+  padding: 9px;
+  color: rgba(237,244,255,.74);
+  font-size: .82rem;
+}
+.mini-grid b {
+  color: #fff;
+  float: right;
+}
+.btn-small {
+  min-height: 32px;
+  padding: 7px 10px;
+  border-radius: 11px;
+  font-size: .82rem;
+}
+.list-row small {
+  display: block;
+  color: #ffce7b;
+  margin-top: 5px;
+}
+.diagnostic-panel pre {
+  white-space: pre-wrap;
+  overflow: auto;
+  max-height: 360px;
+  margin: 0;
+  font-size: .8rem;
+}
+.pill.online,
+.status-badge.online { background: rgba(47, 211, 139, .16); color: #85ffc4; border-color: rgba(47,211,139,.38); }
+.pill.connecting,
+.status-badge.connecting { background: rgba(255, 206, 123, .16); color: #ffdc91; border-color: rgba(255,206,123,.38); }
+.pill.error,
+.status-badge.error { background: rgba(255, 91, 113, .16); color: #ff9aa8; border-color: rgba(255,91,113,.42); }
+.pill.offline,
+.status-badge.offline { background: rgba(255,255,255,.08); color: rgba(237,244,255,.7); border-color: rgba(255,255,255,.16); }
+.health-bars i.ok { background: linear-gradient(90deg, #35f1a5, #57a7ff); }
+.health-bars i.warn { background: linear-gradient(90deg, #ffce7b, #ff6b6b); }
+@media (max-width: 880px) {
+  .account-top, .draft-row { align-items: flex-start; flex-direction: column; }
+}

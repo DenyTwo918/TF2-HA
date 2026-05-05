@@ -1,3 +1,5 @@
-# TF2 HA Add-ons
+# TF2-HA
 
-Current TF2 Trading Hub build: 5.13.64 - Backpack diagnostics and pricing cockpit.
+Home Assistant add-on repository for TF2 Trading Hub and companion services.
+
+Current TF2 Trading Hub version: **5.13.67**.

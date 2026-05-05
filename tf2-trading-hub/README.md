@@ -1,16 +1,15 @@
 # TF2 Trading Hub
 
-Current build: **5.13.64 – Backpack diagnostics and pricing cockpit**.
+Version **5.13.67** adds a Home Assistant friendly multi-account TF2 trading cockpit.
 
-## What changed in 5.13.64
+## Highlights
 
-- Adds Backpack.tf diagnostics for empty listing panels.
-- Distinguishes missing token, missing SteamID64, API errors and valid empty listing responses.
-- Improves parsing of Backpack.tf listing responses.
-- Adds `/api/backpack/diagnostics`.
-- Adds richer price schema feedback and `/api/prices/lookup`.
-- Keeps the Steam login, reliable disconnect and inventory multi-source sync fixes from previous builds.
+- Ingress UI and optional direct Web UI port `8099`.
+- Multiple Steam accounts with isolated `/data/accounts/{account_id}` storage.
+- Steam login, Steam web session and TradeOfferManager per account.
+- Inventory sync, Backpack.tf listings diagnostics and listing drafts per account.
+- Global Backpack.tf price schema cache with separate Backpack API key handling.
+- Safe autonomous pipeline with dry-run default.
+- Manual review remains the default for publishing and trade accept actions.
 
-## Home Assistant
-
-The add-on supports both Home Assistant Ingress and an optional direct Web UI port on `8099`.
+Secrets are stored under `/data` and are not returned by API responses.

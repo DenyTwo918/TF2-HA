@@ -1,6 +1,6 @@
 slug: tf2_trading_hub
 name: TF2 Trading Hub
-version: "5.13.64"
+version: "5.13.67"
 description: Crash-safe TF2 Trading Hub with Steam TradeOfferManager, backpack.tf listings, and manual review UI.
 url: https://github.com/DenyTwo918/TF2-HA
 arch:
@@ -27,6 +27,14 @@ webui: "http://[HOST]:[PORT:8099]"
 
 options:
   global_kill_switch: false
+  autonomous_enabled: false
+  autonomous_publish_enabled: false
+  autonomous_trade_accept_enabled: false
+  autonomous_dry_run_default: true
+  max_parallel_accounts: 1
+  backpack_tf_price_schema_enabled: true
+  backpack_tf_require_separate_api_key: true
+  multi_account_enabled: true
 
   persistent_classifieds_maintainer_enabled: true
   persistent_classifieds_maintainer_safe_minimal_mode_enabled: true
@@ -36,7 +44,7 @@ options:
   persistent_classifieds_max_publishes_per_cycle: 20
 
   backpack_tf_enabled: true
-  backpack_tf_user_agent: TF2-HA-TF2-Trading-Hub/5.13.64
+  backpack_tf_user_agent: TF2-HA-TF2-Trading-Hub/5.13.67
   backpack_tf_base_url: https://backpack.tf
   backpack_tf_cache_ttl_minutes: 30
   backpack_tf_retry_count: 2
@@ -358,6 +366,14 @@ options:
 
 schema:
   global_kill_switch: bool
+  autonomous_enabled: bool
+  autonomous_publish_enabled: bool
+  autonomous_trade_accept_enabled: bool
+  autonomous_dry_run_default: bool
+  max_parallel_accounts: int(1,20)
+  backpack_tf_price_schema_enabled: bool
+  backpack_tf_require_separate_api_key: bool
+  multi_account_enabled: bool
   persistent_classifieds_maintainer_enabled: bool
   persistent_classifieds_maintainer_safe_minimal_mode_enabled: bool
   persistent_classifieds_maintainer_auto_run_enabled: bool

@@ -11,98 +11,61 @@
   <div class="ambient ambient-one"></div>
   <div class="ambient ambient-two"></div>
   <div class="ambient ambient-three"></div>
-
   <div class="shell">
-    <aside class="sidebar" aria-label="TF2 Trading Hub navigation">
-      <div class="brand">
-        <div class="brand-mark">TF2</div>
-        <div>
-          <strong>Trading Hub</strong>
-          <span id="sideVersion">5.13.64</span>
-        </div>
-      </div>
-
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-mark">TF2</div><div><strong>Trading Hub</strong><span id="sideVersion">5.13.67</span></div></div>
       <nav class="nav-list">
         <a href="#dashboard" class="nav-link active">Dashboard</a>
+        <a href="#accounts" class="nav-link">Accounts</a>
+        <a href="#pipeline" class="nav-link">Pipeline</a>
         <a href="#offers" class="nav-link">Trade offers</a>
         <a href="#listings" class="nav-link">Listings</a>
+        <a href="#drafts" class="nav-link">Listing drafts</a>
         <a href="#inventory" class="nav-link">Inventory</a>
         <a href="#credentials" class="nav-link">Credentials</a>
         <a href="#events" class="nav-link">Events</a>
       </nav>
-
-      <div class="ha-card">
-        <span class="ha-dot"></span>
-        <div>
-          <strong>Home Assistant connected</strong>
-          <p>Runs through Ingress and optional direct Web UI port.</p>
-        </div>
-      </div>
+      <div class="ha-card"><span class="ha-dot"></span><div><strong>Home Assistant connected</strong><p>Ingress + optional direct Web UI port 8099.</p></div></div>
     </aside>
 
     <main class="content">
       <section id="dashboard" class="hero card">
         <div class="hero-copy">
-          <div class="eyebrow">Crash-safe Steam bot cockpit</div>
+          <div class="eyebrow">Autonomous multi-account Steam cockpit</div>
           <h1>TF2 Trading Hub</h1>
-          <p>Monitor Steam state, Backpack.tf listings, incoming offers and inventory health from one Home Assistant connected dashboard.</p>
+          <p>Run Steam accounts, Backpack.tf diagnostics, pricing, listing drafts, manual review and dry-run autonomous trading from one HA dashboard.</p>
           <div class="hero-actions">
-            <button id="btnLogin" class="btn btn-primary">Connect bot</button>
+            <select id="accountSelector" class="select"></select>
+            <button id="btnConnect" class="btn btn-primary">Connect account</button>
             <button id="btnDisconnect" class="btn btn-ghost">Disconnect</button>
-            <button id="btnRefreshAll" class="btn btn-ghost">Refresh cockpit</button>
+            <button id="btnRefresh" class="btn btn-ghost">Refresh</button>
           </div>
         </div>
-
         <div class="hero-status">
-          <div id="statusBadge" class="status-badge connecting">connecting…</div>
-          <div class="orbit" aria-hidden="true">
-            <div class="orbit-core">440</div>
-            <span></span><span></span><span></span>
-          </div>
+          <div id="statusBadge" class="status-badge connecting">loading…</div>
+          <div class="orbit"><div class="orbit-core">440</div><span></span><span></span><span></span></div>
         </div>
       </section>
 
-      <section id="setupBanner" class="setup-banner hidden">
-        <div>
-          <strong>Setup required</strong>
-          <p>Save Steam credentials first. The bot will stay safe and manual-review focused until live actions are explicitly enabled.</p>
-        </div>
-        <a href="#credentials" class="btn btn-warning">Open credentials</a>
+      <section class="metric-grid">
+        <article class="metric-card pulse-card"><span>Accounts</span><strong id="statAccounts">—</strong><small id="statAccountsSub">Runtime pool</small></article>
+        <article class="metric-card"><span>Steam online</span><strong id="statOnline">—</strong><small>Connected sessions</small></article>
+        <article class="metric-card"><span>Selected inventory</span><strong id="statInventory">—</strong><small id="statInventorySync">Not synced</small></article>
+        <article class="metric-card"><span>Selected listings</span><strong id="statListings">—</strong><small id="statListingSync">Not synced</small></article>
+        <article class="metric-card"><span>Listing drafts</span><strong id="statDrafts">—</strong><small>Ready / needs price</small></article>
+        <article class="metric-card"><span>Price schema</span><strong id="statPrices">—</strong><small id="statPriceSub">Not loaded</small></article>
       </section>
 
-      <section class="metric-grid" aria-label="Runtime metrics">
-        <article class="metric-card pulse-card">
-          <span>Steam account</span>
-          <strong id="statSteam">—</strong>
-          <small id="statSteamSub">Waiting for runtime</small>
-        </article>
-        <article class="metric-card">
-          <span>Pending offers</span>
-          <strong id="statOffers">—</strong>
-          <small>Manual review queue</small>
-        </article>
-        <article class="metric-card">
-          <span>Backpack.tf listings</span>
-          <strong id="statListings">—</strong>
-          <small id="statListingSync">Not synced</small>
-        </article>
-        <article class="metric-card">
-          <span>Tradable inventory</span>
-          <strong id="statInventory">—</strong>
-          <small id="statInventorySync">Not synced</small>
-        </article>
+      <section id="accounts" class="card section-card">
+        <div class="card-head"><div><p class="eyebrow">Multi-account</p><h2>Accounts</h2></div><button id="btnNewAccount" class="btn btn-ghost">New account</button></div>
+        <div id="accountCards" class="account-grid"></div>
       </section>
 
-      <section id="health" class="grid-two">
+      <section id="pipeline" class="grid-two">
         <article class="card glass-panel">
-          <div class="card-head">
-            <div>
-              <p class="eyebrow">Runtime health</p>
-              <h2>Live bot signal</h2>
-            </div>
-            <span id="statusPill" class="pill">offline</span>
-          </div>
+          <div class="card-head"><div><p class="eyebrow">Runtime health</p><h2>Selected account signal</h2></div><span id="statusPill" class="pill">offline</span></div>
           <div id="loginError" class="notice error hidden"></div>
+          <div id="safetyBanner" class="notice warn"></div>
           <div class="health-bars">
             <div><span>Steam session</span><i id="barSteam"></i></div>
             <div><span>Offer manager</span><i id="barOffers"></i></div>
@@ -110,111 +73,53 @@
             <div><span>Inventory cache</span><i id="barInventory"></i></div>
           </div>
         </article>
-
         <article class="card command-card">
-          <div class="card-head">
-            <div>
-              <p class="eyebrow">Quick actions</p>
-              <h2>Operator controls</h2>
-            </div>
-          </div>
+          <div class="card-head"><div><p class="eyebrow">Operator controls</p><h2>Pipeline actions</h2></div></div>
           <div class="command-grid">
+            <button id="btnRunPipeline" class="btn btn-primary">Run selected pipeline</button>
             <button id="btnSyncOffers" class="btn btn-ghost">Sync offers</button>
             <button id="btnSyncListings" class="btn btn-ghost">Sync listings</button>
             <button id="btnSyncInventory" class="btn btn-ghost">Sync inventory</button>
-            <button id="btnLoadPrices" class="btn btn-ghost">Refresh prices</button>
-            <button id="btnDiagBackpack" class="btn btn-ghost">Backpack diagnostics</button>
+            <button id="btnGenerateDrafts" class="btn btn-ghost">Generate drafts</button>
+            <button id="btnRefreshPrices" class="btn btn-ghost">Refresh prices</button>
+            <button id="btnBackpackDiag" class="btn btn-ghost">Backpack diagnostics</button>
           </div>
         </article>
       </section>
 
-      <section id="offers" class="card section-card">
-        <div class="card-head">
-          <div>
-            <p class="eyebrow">Trade cockpit</p>
-            <h2>Incoming offers <span class="count" id="offerCount">0</span></h2>
-          </div>
-          <button id="btnSyncOffersTop" class="btn btn-ghost">Rescan</button>
-        </div>
-        <div id="offerList" class="offer-list"></div>
-      </section>
-
-      <section id="listings" class="card section-card">
-        <div class="card-head">
-          <div>
-            <p class="eyebrow">Backpack.tf</p>
-            <h2>Active listings</h2>
-          </div>
-          <button id="btnSyncListingsTop" class="btn btn-ghost">Sync listings</button>
-        </div>
-        <div id="backpackDiagnostic" class="diagnostic-panel hidden"></div>
-        <div id="listingList" class="listing-list"></div>
-      </section>
-
-      <section id="inventory" class="card section-card">
-        <div class="card-head">
-          <div>
-            <p class="eyebrow">Inventory</p>
-            <h2>Tradable items <span class="count" id="invCount">0</span></h2>
-          </div>
-          <button id="btnSyncInventoryTop" class="btn btn-ghost">Sync inventory</button>
-        </div>
-        <div id="inventoryPricing" class="diagnostic-panel hidden"></div>
-        <div id="inventoryGrid" class="inventory-grid"></div>
-      </section>
+      <section id="offers" class="card section-card"><div class="card-head"><div><p class="eyebrow">Trade cockpit</p><h2>Incoming offers <span class="count" id="offerCount">0</span></h2></div></div><div id="offerList" class="offer-list"></div></section>
+      <section id="listings" class="card section-card"><div class="card-head"><div><p class="eyebrow">Backpack.tf</p><h2>Active listings</h2></div></div><div id="backpackDiagnostic" class="diagnostic-panel hidden"></div><div id="listingList" class="listing-list"></div></section>
+      <section id="drafts" class="card section-card"><div class="card-head"><div><p class="eyebrow">Autonomous safe output</p><h2>Listing drafts <span class="count" id="draftCount">0</span></h2></div></div><div id="draftList" class="listing-list"></div></section>
+      <section id="inventory" class="card section-card"><div class="card-head"><div><p class="eyebrow">Inventory</p><h2>Tradable items <span class="count" id="invCount">0</span></h2></div></div><div id="inventoryPricing" class="diagnostic-panel hidden"></div><div id="inventoryGrid" class="inventory-grid"></div></section>
 
       <section id="credentials" class="card section-card">
-        <div class="card-head">
-          <div>
-            <p class="eyebrow">Secure setup</p>
-            <h2>Bot credentials</h2>
-          </div>
-          <span class="pill safe">Stored in /data</span>
-        </div>
-        <form id="credsForm" autocomplete="off">
+        <div class="card-head"><div><p class="eyebrow">Secure setup</p><h2>Selected account</h2></div><span class="pill safe">Secrets stay in /data</span></div>
+        <form id="accountForm" autocomplete="off">
           <div class="form-grid">
-            <label>Steam username
-              <input type="text" name="username" autocomplete="username" placeholder="bot account login">
-            </label>
-            <label>Steam password
-              <input type="password" name="password" autocomplete="current-password" placeholder="••••••••">
-            </label>
-            <label>Shared secret
-              <input type="text" name="shared_secret" autocomplete="off" placeholder="base64 Steam Guard secret">
-            </label>
-            <label>Identity secret
-              <input type="text" name="identity_secret" autocomplete="off" placeholder="base64 confirmation secret">
-            </label>
-            <label>Steam Web API key
-              <input type="text" name="steam_api_key" autocomplete="off" placeholder="32-character key">
-            </label>
-            <label>Steam ID64
-              <input type="text" name="steam_id" autocomplete="off" placeholder="76561198…">
-            </label>
-            <label class="full">Backpack.tf token
-              <input type="text" name="bptf_token" autocomplete="off" placeholder="Backpack.tf token">
-            </label>
+            <label>Account ID<input name="account_id" placeholder="main" required></label>
+            <label>Label<input name="label" placeholder="Main account"></label>
+            <label>Role<select name="role"><option>main</option><option>trading</option><option>storage</option><option>pricing_only</option><option>disabled</option></select></label>
+            <label>Enabled<select name="enabled"><option value="true">true</option><option value="false">false</option></select></label>
+            <label>Steam username<input name="steam_username" placeholder="bot account login"></label>
+            <label>Steam password<input name="steam_password" type="password" placeholder="leave empty to keep saved"></label>
+            <label>Shared secret<input name="shared_secret" placeholder="base64 Steam Guard secret"></label>
+            <label>Identity secret<input name="identity_secret" placeholder="base64 confirmation secret"></label>
+            <label>Steam Web API key<input name="steam_web_api_key" placeholder="Steam key"></label>
+            <label>Steam ID64<input name="steamid64" placeholder="76561198…"></label>
+            <label>Backpack access token<input name="backpack_access_token" placeholder="classifieds/listings token"></label>
+            <label>Backpack API key<input name="backpack_api_key" placeholder="pricing IGetPrices key"></label>
+            <label>Dry run<select name="dry_run"><option value="true">true</option><option value="false">false</option></select></label>
+            <label>Autonomous enabled<select name="autonomous_enabled"><option value="false">false</option><option value="true">true</option></select></label>
+            <label>Auto publish<select name="autonomous_publish_enabled"><option value="false">false</option><option value="true">true</option></select></label>
+            <label>Auto trade accept<select name="autonomous_trade_accept_enabled"><option value="false">false</option><option value="true">true</option></select></label>
           </div>
-          <div class="form-footer">
-            <button type="submit" class="btn btn-primary">Save credentials</button>
-            <p id="credsSaveStatus" class="save-status hidden"></p>
-          </div>
+          <div class="form-footer"><button class="btn btn-primary" type="submit">Save account</button><p id="saveStatus" class="save-status hidden"></p></div>
         </form>
       </section>
 
-      <section id="events" class="card section-card">
-        <div class="card-head">
-          <div>
-            <p class="eyebrow">Live audit</p>
-            <h2>Event stream</h2>
-          </div>
-          <button id="btnClearLog" class="btn btn-ghost">Clear view</button>
-        </div>
-        <div id="eventLog" class="event-log"></div>
-      </section>
+      <section id="events" class="card section-card"><div class="card-head"><div><p class="eyebrow">Live audit</p><h2>Event stream</h2></div><button id="btnClearEvents" class="btn btn-ghost">Clear view</button></div><div id="eventList" class="event-list"></div></section>
     </main>
   </div>
-
   <script src="./app.js"></script>
 </body>
 </html>
