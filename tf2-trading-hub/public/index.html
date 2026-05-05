@@ -9,7 +9,7 @@
 <body>
   <header>
     <div class="header-inner">
-      <h1>TF2 Trading Hub <span class="version" id="version">5.13.60</span></h1>
+      <h1>TF2 Trading Hub <span class="version" id="version">5.13.61</span></h1>
       <div class="status-badge" id="statusBadge">connecting…</div>
     </div>
   </header>
@@ -20,6 +20,17 @@
     <section id="setupBanner" class="card warn hidden">
       <h2>Setup required</h2>
       <p>Enter your Steam credentials below to start the bot.</p>
+    </section>
+
+    <section id="steamGuardCard" class="card guard hidden">
+      <h2>Steam Guard required</h2>
+      <p>Open Steam app on your phone, go to Steam Guard and enter the current code.</p>
+      <form id="steamGuardForm" class="guard-form">
+        <input type="text" name="code" inputmode="text" autocomplete="one-time-code" maxlength="8" placeholder="Steam Guard code">
+        <button type="submit" class="primary">Submit code</button>
+        <button type="button" id="btnCancelSteamGuard">Cancel login</button>
+      </form>
+      <p class="save-status hidden" id="steamGuardStatus"></p>
     </section>
 
     <!-- Status row -->
@@ -82,7 +93,7 @@
           <label>Steam password
             <input type="password" name="password" autocomplete="new-password" placeholder="••••••••">
           </label>
-          <label>Shared secret (2FA)
+          <label>Shared secret (2FA, optional)
             <input type="password" name="shared_secret" autocomplete="off" placeholder="base64…">
           </label>
           <label>Identity secret (confirmations)
@@ -95,7 +106,7 @@
             <input type="text" name="steam_id" autocomplete="off" placeholder="76561198…">
           </label>
           <label class="full">Backpack.tf token
-            <input type="text" name="bptf_token" autocomplete="off" placeholder="…">
+            <input type="password" name="bptf_token" autocomplete="off" placeholder="…">
           </label>
         </div>
         <div class="btn-row">

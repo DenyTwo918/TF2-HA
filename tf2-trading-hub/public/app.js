@@ -78,6 +78,18 @@ function renderStatus(data) {
     }
   }
 
+  const guard = data.steam_guard || {};
+  show('#steamGuardCard', data.status === 'needs_2fa' || guard.required);
+  const guardStatus = qs('#steamGuardStatus');
+  if (guardStatus) {
+    if (guard.last_code_wrong) {
+      guardStatus.textContent = 'Code was rejected. Wait for a fresh code in your phone app and try again.';
+      guardStatus.classList.remove('hidden');
+    } else {
+      guardStatus.classList.add('hidden');
+    }
+  }
+
   // Show setup banner if credentials missing
   const needsSetup = !c.has_username || !c.has_password;
   show('#setupBanner', needsSetup);
@@ -337,6 +349,35 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.disabled    = false;
       btn.textContent = 'Save credentials';
     }
+  });
+
+  const guardForm = qs('#steamGuardForm');
+  guardForm?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const input = guardForm.querySelector('[name=code]');
+    const btn = guardForm.querySelector('[type=submit]');
+    const status = qs('#steamGuardStatus');
+    const code = String(input?.value || '').trim().toUpperCase();
+    btn.disabled = true;
+    btn.textContent = 'Submitting…';
+    try {
+      await api('/api/steamguard/code', { method: 'POST', body: JSON.stringify({ code }) });
+      if (status) { status.textContent = 'Code submitted. Connecting…'; status.classList.remove('hidden'); }
+      input.value = '';
+      addLog('info', 'Steam Guard code submitted');
+      loadStatus();
+    } catch (err) {
+      if (status) { status.textContent = 'Error: ' + err.message; status.classList.remove('hidden'); }
+      addLog('error', 'Steam Guard code failed: ' + err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Submit code';
+    }
+  });
+
+  qs('#btnCancelSteamGuard')?.addEventListener('click', async () => {
+    await api('/api/steamguard/cancel', { method: 'POST' }).catch(() => {});
+    loadStatus();
   });
 
   // Buttons
