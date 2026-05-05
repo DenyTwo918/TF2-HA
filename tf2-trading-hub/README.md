@@ -1,10 +1,10 @@
 # TF2 Trading Hub
 
-Current build: **5.13.59 – Crash-safe Steam bot rework**.
+Current build: **5.13.60 – Crash-safe Steam bot rework**.
 
 A Home Assistant add-on for TF2 trade monitoring, manual trade review, backpack.tf listings, and Steam inventory visibility. This version replaces the previous large single-file runtime with a smaller Express-based server using Steam bot libraries inspired by TF2Autobot/tf2-express patterns.
 
-## What changed in 5.13.59
+## What changed in 5.13.60
 
 - Real Steam runtime foundation with `steam-user`, `steamcommunity`, `steam-tradeoffer-manager`, and `steam-totp`.
 - Event-driven trade offer queue with manual accept/decline actions.
@@ -22,7 +22,7 @@ Live trade actions are still manual from the dashboard. The add-on does not auto
 
 1. Home Assistant → Settings → Add-ons → Add-on Store → menu (⋮) → Repositories.
 2. Add: `https://github.com/DenyTwo918/TF2-HA`.
-3. Install or update **TF2 Trading Hub** to **5.13.59**.
+3. Install or update **TF2 Trading Hub** to **5.13.60**.
 4. Rebuild/start the add-on and check logs for `server_ready`.
 
 ## Setup credentials
