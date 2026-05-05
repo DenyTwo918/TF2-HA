@@ -1,6 +1,6 @@
 slug: tf2_trading_hub
 name: TF2 Trading Hub
-version: "5.13.63"
+version: "5.13.64"
 description: Crash-safe TF2 Trading Hub with Steam TradeOfferManager, backpack.tf listings, and manual review UI.
 url: https://github.com/DenyTwo918/TF2-HA
 arch:
@@ -36,7 +36,7 @@ options:
   persistent_classifieds_max_publishes_per_cycle: 20
 
   backpack_tf_enabled: true
-  backpack_tf_user_agent: TF2-HA-TF2-Trading-Hub/5.13.63
+  backpack_tf_user_agent: TF2-HA-TF2-Trading-Hub/5.13.64
   backpack_tf_base_url: https://backpack.tf
   backpack_tf_cache_ttl_minutes: 30
   backpack_tf_retry_count: 2

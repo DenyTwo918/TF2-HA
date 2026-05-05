@@ -11,7 +11,7 @@ const { EventEmitter } = require('events');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const VERSION  = '5.13.63';
+const VERSION  = '5.13.64';
 const PORT     = Number(process.env.PORT  || 8099);
 const DATA_DIR = process.env.DATA_DIR    || '/data';
 
@@ -129,6 +129,11 @@ const bot = {
   displayName: null,
   offerQueue:  [],          // pending manual review
   listings:    [],
+  lastListingError: null,
+  lastListingSource: null,
+  lastBptfDiagnostic: { status: 'not_checked' },
+  lastPriceSchemaSync: null,
+  priceItemCount: 0,
   inventory:   readJson(P.inventory, []),
   lastOfferSync:   null,
   lastListingSync: null,
@@ -172,48 +177,140 @@ async function apiFetch(url, opts = {}, timeoutMs = 20000) {
 let _priceSchemaCache = null;
 let _priceSchemaTTL   = 0;
 
+function getPriceItemCount(schema) {
+  return Object.keys(schema?.response?.items || schema?.items || {}).length;
+}
+
+function summarizeBptfError(err) {
+  const body = err?.body || {};
+  return {
+    error: err?.message || 'Unknown Backpack.tf error',
+    status: err?.status || null,
+    message: body.message || body.error || body.raw || null,
+  };
+}
+
 async function getPriceSchema() {
   if (_priceSchemaCache && Date.now() < _priceSchemaTTL) return _priceSchemaCache;
   const c = loadCreds();
-  if (!c.bptf_token) return readJson(P.priceSchema, null);
+  if (!c.bptf_token) {
+    const cached = readJson(P.priceSchema, null);
+    bot.priceItemCount = getPriceItemCount(cached);
+    return cached;
+  }
   try {
     const data = await apiFetch(
-      `https://backpack.tf/api/IGetPrices/v4?key=${c.bptf_token}&appid=440`,
+      `https://backpack.tf/api/IGetPrices/v4?key=${encodeURIComponent(c.bptf_token)}&appid=440`,
       {}, 30000
     );
     _priceSchemaCache = data;
     _priceSchemaTTL   = Date.now() + 60 * 60 * 1000; // 1 h
+    bot.lastPriceSchemaSync = new Date().toISOString();
+    bot.priceItemCount = getPriceItemCount(data);
     writeJson(P.priceSchema, data);
-    log('info', 'price_schema_updated', {});
+    log('info', 'price_schema_updated', { count: bot.priceItemCount });
     return data;
   } catch (err) {
-    log('warn', 'price_schema_fetch_failed', { error: err.message });
-    return readJson(P.priceSchema, null);
+    const detail = summarizeBptfError(err);
+    log('warn', 'price_schema_fetch_failed', detail);
+    const cached = readJson(P.priceSchema, null);
+    bot.priceItemCount = getPriceItemCount(cached);
+    return cached;
   }
+}
+
+function extractListingsPayload(data) {
+  const candidates = [
+    data?.listings,
+    data?.response?.listings,
+    data?.results,
+    data?.response?.results,
+    data?.classifieds,
+    data?.response?.classifieds,
+  ];
+  for (const c of candidates) if (Array.isArray(c)) return c;
+
+  // Some APIs can return an object keyed by listing id / item name. Flatten safely.
+  for (const c of candidates) {
+    if (c && typeof c === 'object') {
+      const values = Object.values(c).flatMap(v => Array.isArray(v) ? v : [v]);
+      if (values.length) return values;
+    }
+  }
+  return [];
+}
+
+function normalizeListing(l) {
+  const item = l?.item || l?.item_details || l?.details || {};
+  const currencies = l?.currencies || l?.price || l?.currencies_raw || {};
+  const intentRaw = l?.intent ?? l?.listing_intent ?? l?.buyout;
+  return {
+    id:         String(l?.id || l?.listing_id || l?._id || l?.steamid || `${Date.now()}-${Math.random()}`),
+    intent:     intentRaw === 0 || intentRaw === 'buy' ? 'buy' : 'sell',
+    item_name:  item?.name || l?.item_name || l?.name || l?.market_hash_name || 'Unknown item',
+    currencies,
+    bump:       l?.bump || l?.bumped_at || null,
+    created:    l?.created || l?.created_at || null,
+    raw_intent: intentRaw ?? null,
+  };
 }
 
 async function syncListings() {
   const c = loadCreds();
-  const steamId = c.steam_id || bot.steamId;
-  if (!c.bptf_token || !steamId) { bot.listings = readJson(P.listings, []); return bot.listings; }
+  const steamId = String(c.steam_id || bot.steamId || '').trim();
+  bot.lastListingError = null;
+
+  if (!c.bptf_token) {
+    bot.listings = readJson(P.listings, []);
+    bot.lastBptfDiagnostic = {
+      status: 'missing_token',
+      message: 'Backpack.tf token is not saved. Save a token in Credentials.',
+      steam_id: steamId || null,
+      cached_count: bot.listings.length,
+    };
+    return bot.listings;
+  }
+  if (!steamId) {
+    bot.listings = readJson(P.listings, []);
+    bot.lastBptfDiagnostic = {
+      status: 'missing_steam_id',
+      message: 'SteamID64 is missing. Save Steam ID64 or connect the bot first.',
+      cached_count: bot.listings.length,
+    };
+    return bot.listings;
+  }
+
   try {
-    const data = await apiFetch(
-      `https://backpack.tf/api/classifieds/listings/v1?token=${c.bptf_token}&steamid=${steamId}`,
-      {}, 20000
-    );
-    bot.listings = (data.listings || []).map(l => ({
-      id:         l.id,
-      intent:     l.intent === 0 ? 'buy' : 'sell',
-      item_name:  l.item?.name || 'Unknown',
-      currencies: l.currencies,
-      bump:       l.bump,
-      created:    l.created,
-    }));
+    const url = `https://backpack.tf/api/classifieds/listings/v1?token=${encodeURIComponent(c.bptf_token)}&steamid=${encodeURIComponent(steamId)}`;
+    const data = await apiFetch(url, {}, 20000);
+    const rawListings = extractListingsPayload(data);
+    bot.listings = rawListings.map(normalizeListing).filter(l => l.item_name && l.item_name !== 'Unknown item' || l.id);
     bot.lastListingSync = new Date().toISOString();
+    bot.lastListingSource = 'backpack_classifieds';
+    bot.lastBptfDiagnostic = {
+      status: bot.listings.length ? 'ok' : 'empty',
+      message: bot.listings.length
+        ? `Loaded ${bot.listings.length} Backpack.tf listings.`
+        : 'Backpack.tf API responded successfully, but returned zero active listings for this SteamID.',
+      steam_id: steamId,
+      response_keys: data && typeof data === 'object' ? Object.keys(data).slice(0, 12) : [],
+      raw_count: rawListings.length,
+      parsed_count: bot.listings.length,
+      token_saved: true,
+    };
     writeJson(P.listings, bot.listings);
-    log('info', 'listings_synced', { count: bot.listings.length });
+    log('info', 'listings_synced', { count: bot.listings.length, status: bot.lastBptfDiagnostic.status });
   } catch (err) {
-    log('warn', 'listings_sync_failed', { error: err.message });
+    const detail = summarizeBptfError(err);
+    bot.lastListingError = detail.error;
+    bot.lastBptfDiagnostic = {
+      status: 'error',
+      message: detail.message || detail.error,
+      http_status: detail.status,
+      steam_id: steamId,
+      token_saved: true,
+    };
+    log('warn', 'listings_sync_failed', detail);
     bot.listings = readJson(P.listings, []);
   }
   return bot.listings;
@@ -666,6 +763,11 @@ app.get('/api/status', (req, res) => {
     login_error:     bot.loginError,
     offer_queue:     bot.offerQueue.length,
     listing_count:   bot.listings.length,
+    listing_error:   bot.lastListingError,
+    listing_source:  bot.lastListingSource,
+    backpack:        bot.lastBptfDiagnostic,
+    price_item_count: bot.priceItemCount,
+    last_price_schema_sync: bot.lastPriceSchemaSync,
     inventory_count: bot.inventory.length,
     inventory_error: bot.lastInvError,
     inventory_retry_after: bot.nextInvSyncAfter,
@@ -733,12 +835,12 @@ app.post('/api/offers/:id/counter', wrap(async (req, res) => {
 // ── Listings ─────────────────────────────────────────────────────────────────
 
 app.get('/api/listings', (_req, res) =>
-  res.json({ ok: true, listings: bot.listings, last_sync: bot.lastListingSync })
+  res.json({ ok: true, listings: bot.listings, last_sync: bot.lastListingSync, diagnostic: bot.lastBptfDiagnostic, error: bot.lastListingError })
 );
 
 app.post('/api/listings/sync', wrap(async (req, res) => {
   const listings = await syncListings();
-  res.json({ ok: true, listings, last_sync: bot.lastListingSync });
+  res.json({ ok: true, listings, last_sync: bot.lastListingSync, diagnostic: bot.lastBptfDiagnostic, error: bot.lastListingError });
 }));
 
 app.post('/api/listings', wrap(async (req, res) => {
@@ -780,8 +882,30 @@ app.post('/api/inventory/sync', wrap(async (req, res) => {
 
 app.get('/api/prices/schema', wrap(async (req, res) => {
   const schema = await getPriceSchema();
-  res.json({ ok: true, has_schema: !!schema, item_count: schema ? Object.keys(schema.response?.items || {}).length : 0 });
+  res.json({ ok: true, has_schema: !!schema, item_count: getPriceItemCount(schema), last_sync: bot.lastPriceSchemaSync });
 }));
+
+app.get('/api/prices/lookup', wrap(async (req, res) => {
+  const name = String(req.query.name || '').trim().toLowerCase();
+  const schema = await getPriceSchema();
+  const items = schema?.response?.items || schema?.items || {};
+  const key = Object.keys(items).find(k => k.toLowerCase() === name);
+  const price = key ? items[key] : null;
+  res.json({ ok: true, name: req.query.name || '', found: !!price, price });
+}));
+
+app.get('/api/backpack/diagnostics', (_req, res) => {
+  res.json({
+    ok: true,
+    listing_count: bot.listings.length,
+    last_listing_sync: bot.lastListingSync,
+    listing_error: bot.lastListingError,
+    diagnostic: bot.lastBptfDiagnostic,
+    price_item_count: bot.priceItemCount,
+    last_price_schema_sync: bot.lastPriceSchemaSync,
+    credentials: { has_bptf_token: credStatus().has_bptf_token, steam_id: credStatus().steam_id || bot.steamId || null },
+  });
+});
 
 // ── Bot control ──────────────────────────────────────────────────────────────
 
@@ -853,6 +977,9 @@ app.get('/api/diagnostics/bundle', (_req, res) => {
     credentials: credStatus(),
     offer_queue: bot.offerQueue.length,
     listing_count: bot.listings.length,
+    listing_error: bot.lastListingError,
+    backpack: bot.lastBptfDiagnostic,
+    price_item_count: bot.priceItemCount,
     inventory_count: bot.inventory.length,
     inventory_error: bot.lastInvError,
     inventory_retry_after: bot.nextInvSyncAfter,
@@ -877,6 +1004,9 @@ app.get('/api/diagnostics', (_req, res) => {
     credentials:    credStatus(),
     offer_queue:    bot.offerQueue.length,
     listing_count:  bot.listings.length,
+    listing_error:  bot.lastListingError,
+    backpack:       bot.lastBptfDiagnostic,
+    price_item_count: bot.priceItemCount,
     inventory_count: bot.inventory.length,
     inventory_error: bot.lastInvError,
     inventory_retry_after: bot.nextInvSyncAfter,

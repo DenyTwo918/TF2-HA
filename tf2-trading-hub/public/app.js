@@ -73,7 +73,7 @@ function renderStatus(data) {
     statusPill.className = `pill ${cls}`;
   }
 
-  const version = data.version || '5.13.63';
+  const version = data.version || '5.13.64';
   setText('sideVersion', version);
 
   const connectBtn = qs('#btnLogin');
@@ -89,7 +89,8 @@ function renderStatus(data) {
   setText('statOffers', data.offer_queue ?? 0);
   setText('statListings', data.listing_count ?? 0);
   setText('statInventory', data.inventory_count ?? 0);
-  setText('statListingSync', fmtTime(data.last_listing_sync));
+  const backpackStatus = data.backpack?.status ? ` · ${data.backpack.status}` : '';
+  setText('statListingSync', `${fmtTime(data.last_listing_sync)}${backpackStatus}`);
   if (data.inventory_error) {
     const retry = data.inventory_retry_after ? ` · retry ${fmtTime(data.inventory_retry_after).replace('Synced ', '')}` : '';
     setText('statInventorySync', `Inventory error: ${data.inventory_error}${retry}`);
@@ -103,7 +104,7 @@ function renderStatus(data) {
   const online = data.status === 'online';
   setHealthBar('barSteam', online ? 100 : data.status === 'connecting' ? 45 : 14);
   setHealthBar('barOffers', data.offer_manager_ready ? 92 : hasOffers ? 88 : online ? 50 : 20);
-  setHealthBar('barBackpack', hasListings ? 90 : c.has_bptf_token ? 42 : 16);
+  setHealthBar('barBackpack', hasListings ? 90 : data.backpack?.status === 'empty' ? 62 : c.has_bptf_token ? 42 : 16);
   setHealthBar('barInventory', data.inventory_error ? 18 : hasInventory ? 92 : c.steam_id || data.steam_id ? 38 : 14);
 
   const errEl = qs('#loginError');
@@ -235,6 +236,18 @@ function listingPrice(currencies) {
     .join(' + ') || '?';
 }
 
+function renderBackpackDiagnostic(diagnostic, error) {
+  const el = qs('#backpackDiagnostic');
+  if (!el) return;
+  const status = diagnostic?.status || (error ? 'error' : 'not_checked');
+  const message = diagnostic?.message || error || 'Backpack.tf diagnostics are waiting for the next sync.';
+  const steam = diagnostic?.steam_id ? `<span>SteamID64: ${esc(diagnostic.steam_id)}</span>` : '';
+  const raw = diagnostic?.raw_count !== undefined ? `<span>Raw: ${esc(diagnostic.raw_count)}</span>` : '';
+  const parsed = diagnostic?.parsed_count !== undefined ? `<span>Parsed: ${esc(diagnostic.parsed_count)}</span>` : '';
+  el.className = `diagnostic-panel ${status === 'ok' ? 'ok' : status === 'empty' ? 'warn' : status === 'not_checked' ? 'hidden' : 'error'}`;
+  el.innerHTML = `<strong>Backpack.tf: ${esc(status)}</strong><p>${esc(message)}</p><div class="diag-tags">${steam}${raw}${parsed}</div>`;
+}
+
 function renderListings(listings = []) {
   const el = qs('#listingList');
   if (!el) return;
@@ -246,11 +259,12 @@ function renderListings(listings = []) {
         <span class="listing-price">${esc(listingPrice(l.currencies))}</span>
         <button class="btn btn-danger btn-small" data-action="delete-listing" data-id="${esc(l.id)}">Remove</button>
       </article>`).join('')
-    : '<div class="empty-state">No listings loaded yet. Sync Backpack.tf listings to populate this panel.</div>';
+    : '<div class="empty-state">No active listings returned. Check Backpack diagnostics above, token, SteamID64, and whether this account has public classified listings.</div>';
 }
 
 async function loadListings() {
   const data = await api('/api/listings');
+  renderBackpackDiagnostic(data.diagnostic, data.error);
   renderListings(data.listings || []);
   return data.listings || [];
 }
@@ -259,9 +273,11 @@ async function syncListings(button) {
   setBusy(button, true, 'Syncing…');
   try {
     const data = await api('/api/listings/sync', { method: 'POST' });
+    renderBackpackDiagnostic(data.diagnostic, data.error);
     renderListings(data.listings || []);
     setText('statListings', (data.listings || []).length);
-    setText('statListingSync', fmtTime(data.last_sync));
+    const status = data.diagnostic?.status ? ` · ${data.diagnostic.status}` : '';
+    setText('statListingSync', `${fmtTime(data.last_sync)}${status}`);
     addLog('info', `Listings synced: ${(data.listings || []).length}`);
   } catch (err) {
     addLog('error', `Listings sync failed: ${err.message}`);
@@ -297,6 +313,7 @@ function renderInventory(items = []) {
         <div class="item-icon">${esc(initials)}</div>
         <strong>${esc(name)}</strong>
         <span>${esc(item.quality || 'Tradable')}</span>
+        ${item.price ? `<small>${esc(item.price)}</small>` : ''}
       </article>`;
     }).join('') + (items.length > 240 ? `<div class="empty-state">…and ${items.length - 240} more items</div>` : '')
     : '<div class="empty-state">Inventory is empty or not loaded yet.</div>';
@@ -329,9 +346,28 @@ async function refreshPrices(button) {
   setBusy(button, true, 'Refreshing…');
   try {
     const data = await api('/api/prices/schema');
+    const el = qs('#inventoryPricing');
+    if (el) {
+      el.className = `diagnostic-panel ${data.has_schema ? 'ok' : 'warn'}`;
+      el.innerHTML = `<strong>Backpack.tf price schema</strong><p>${data.has_schema ? `${data.item_count || 0} priced item entries loaded.` : 'No price schema loaded. Save Backpack.tf token and refresh prices.'}</p>`;
+    }
     addLog('info', `Price schema loaded: ${data.item_count || 0} items`);
   } catch (err) {
     addLog('error', `Price refresh failed: ${err.message}`);
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+async function loadBackpackDiagnostics(button) {
+  setBusy(button, true, 'Checking…');
+  try {
+    const data = await api('/api/backpack/diagnostics');
+    renderBackpackDiagnostic(data.diagnostic, data.listing_error);
+    addLog('info', `Backpack diagnostics: ${data.diagnostic?.status || 'unknown'}`);
+  } catch (err) {
+    renderBackpackDiagnostic({ status: 'error', message: err.message }, err.message);
+    addLog('error', `Backpack diagnostics failed: ${err.message}`);
   } finally {
     setBusy(button, false);
   }
@@ -473,6 +509,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bind('#btnSyncInventory', syncInventory);
   bind('#btnSyncInventoryTop', syncInventory);
   bind('#btnLoadPrices', refreshPrices);
+  bind('#btnDiagBackpack', loadBackpackDiagnostics);
   qs('#btnRefreshAll')?.addEventListener('click', e => {
     setBusy(e.currentTarget, true, 'Refreshing…');
     refreshCockpit(true).finally(() => setBusy(e.currentTarget, false));
