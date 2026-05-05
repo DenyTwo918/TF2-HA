@@ -284,23 +284,3 @@ input:focus { border-color: rgba(56, 189, 248, 0.72); box-shadow: 0 0 0 3px rgba
   .inventory-grid { grid-template-columns: 1fr; }
   h1 { font-size: 28px; }
 }
-
-
-.guard {
-  border-color: rgba(245, 158, 11, 0.45);
-  background: linear-gradient(180deg, rgba(245, 158, 11, 0.12), rgba(17, 24, 39, 0.86));
-}
-
-.guard-form {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.guard-form input {
-  max-width: 220px;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-weight: 700;
-}

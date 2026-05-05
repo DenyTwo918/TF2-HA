@@ -1,6 +1,6 @@
 # TF2-HA
 
-Current TF2 Trading Hub build: 5.13.63 - Manual Steam Guard pre-login fix.
+Current TF2 Trading Hub build: 5.13.59 - crash-safe Steam bot rework.
 
 Repository contains the TF2 Trading Hub Home Assistant add-on and optional SDA Bridge helper.
 

@@ -2,24 +2,8 @@
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 
-function ingressBasePath() {
-  const parts = window.location.pathname.split('/').filter(Boolean);
-  const i = parts.indexOf('hassio_ingress');
-  if (i >= 0 && parts[i + 1]) {
-    return '/' + parts.slice(0, i + 2).join('/');
-  }
-  return '';
-}
-
-const API_BASE = ingressBasePath();
-
-function apiUrl(path) {
-  const clean = String(path || '').startsWith('/') ? String(path) : `/${path}`;
-  return `${API_BASE}${clean}`;
-}
-
 async function api(path, opts = {}) {
-  const r = await fetch(apiUrl(path), {
+  const r = await fetch(path, {
     headers: { 'Content-Type': 'application/json', ...opts.headers },
     ...opts,
   });
@@ -53,7 +37,6 @@ const STATUS_CLASS = {
   offline:     'offline',
   error:       'error',
   needs_2fa:   'warn',
-  throttled:   'error',
 };
 
 function renderStatus(data) {
@@ -72,22 +55,10 @@ function renderStatus(data) {
   const errEl = qs('#loginError');
   if (errEl) {
     if (data.login_error) {
-      errEl.textContent = data.login_error + (data.throttle_until ? ` Retry after: ${new Date(data.throttle_until).toLocaleTimeString()}` : '');
+      errEl.textContent = data.login_error;
       errEl.classList.remove('hidden');
     } else {
       errEl.classList.add('hidden');
-    }
-  }
-
-  const guard = data.steam_guard || {};
-  show('#steamGuardCard', data.status === 'needs_2fa' || guard.required);
-  const guardStatus = qs('#steamGuardStatus');
-  if (guardStatus) {
-    if (guard.last_code_wrong) {
-      guardStatus.textContent = 'Code was rejected. Wait for a fresh code in the Steam mobile app and try again. Do not spam Connect.';
-      guardStatus.classList.remove('hidden');
-    } else {
-      guardStatus.classList.add('hidden');
     }
   }
 
@@ -277,7 +248,7 @@ async function loadEvents() {
 // ─── SSE live feed ────────────────────────────────────────────────────────────
 
 function connectSSE() {
-  const es = new EventSource(apiUrl('/api/events/stream'));
+  const es = new EventSource('/api/events/stream');
   es.onmessage = e => {
     let msg;
     try { msg = JSON.parse(e.data); } catch { return; }
@@ -349,48 +320,6 @@ document.addEventListener('DOMContentLoaded', () => {
     } finally {
       btn.disabled    = false;
       btn.textContent = 'Save credentials';
-    }
-  });
-
-  const guardForm = qs('#steamGuardForm');
-  guardForm?.addEventListener('submit', async e => {
-    e.preventDefault();
-    const input = guardForm.querySelector('[name=code]');
-    const btn = guardForm.querySelector('[type=submit]');
-    const status = qs('#steamGuardStatus');
-    const code = String(input?.value || '').trim().toUpperCase();
-    btn.disabled = true;
-    btn.textContent = 'Submitting…';
-    try {
-      await api('/api/steamguard/code', { method: 'POST', body: JSON.stringify({ code }) });
-      if (status) { status.textContent = 'Code submitted. Connecting…'; status.classList.remove('hidden'); }
-      input.value = '';
-      addLog('info', 'Steam Guard code submitted');
-      loadStatus();
-    } catch (err) {
-      if (status) { status.textContent = 'Error: ' + err.message; status.classList.remove('hidden'); }
-      addLog('error', 'Steam Guard code failed: ' + err.message);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Submit code';
-    }
-  });
-
-  qs('#btnCancelSteamGuard')?.addEventListener('click', async () => {
-    await api('/api/steamguard/cancel', { method: 'POST' }).catch(() => {});
-    loadStatus();
-  });
-
-  qs('#btnClearSecrets')?.addEventListener('click', async () => {
-    if (!confirm('Clear stored shared_secret and identity_secret from addon data?')) return;
-    const status = qs('#credsSaveStatus');
-    try {
-      await api('/api/credentials/clear-secrets', { method: 'POST' });
-      if (status) { status.textContent = 'Steam 2FA secrets cleared. Manual phone code mode is active.'; status.classList.remove('hidden'); }
-      addLog('warn', 'Steam secrets cleared');
-      loadStatus();
-    } catch (err) {
-      if (status) { status.textContent = 'Error: ' + err.message; status.classList.remove('hidden'); }
     }
   });
 
