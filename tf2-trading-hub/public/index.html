@@ -7,196 +7,115 @@
   <link rel="stylesheet" href="./app.css">
 </head>
 <body>
-  <main class="shell">
-    <section class="hero hubHero">
-      <div>
-        <p class="eyebrow">Home Assistant add-on · 5.13.58 · Minimal UI + Controlled Fill One</p>
-        <h1>TF2 Trading Hub</h1>
-        <p class="lead">Minimal safe TF2 Trading Hub with manual maintainer control. Use the Maintainer ON/OFF toggle. Use Fill 1 listing when you want one controlled Backpack.tf publish.</p><div class="buildBanner"><b>Build 5.13.58 loaded</b><span>Minimal UI is focused on account readiness, status, Maintain now, and Fill 1 listing. Controlled Fill One publishes at most one guarded Backpack.tf listing.</span></div>
-        <div class="heroActions diagnosticFirstActions">
-          <button id="runDiagnosticBundle" class="primary">Diagnostic bundle for assistant</button>
-          <button id="refreshAll">Refresh cockpit</button><button id="toggleSimpleUi">Show advanced UI</button>
-          <details class="softDetails manualHeroTools"><summary>Manual/debug tools</summary>
-            <div class="buttonRow">
-              <button id="runAutopilot">Run autopilot now</button>
-              <button id="syncBackpack">Sync Backpack.tf</button>
-              <button id="syncInventory">Sync inventory</button>
-              <button id="review">Run trade review</button>
-            </div>
-          </details>
+  <header>
+    <div class="header-inner">
+      <h1>TF2 Trading Hub <span class="version" id="version">5.13.59</span></h1>
+      <div class="status-badge" id="statusBadge">connecting…</div>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- Setup banner (hidden when credentials are set) -->
+    <section id="setupBanner" class="card warn hidden">
+      <h2>Setup required</h2>
+      <p>Enter your Steam credentials below to start the bot.</p>
+    </section>
+
+    <!-- Status row -->
+    <div class="row">
+      <section class="card" id="statusCard">
+        <h2>Bot status</h2>
+        <div class="stat-grid" id="statusGrid">
+          <div class="stat"><label>Steam</label><span id="statSteam">—</span></div>
+          <div class="stat"><label>Offers pending</label><span id="statOffers">—</span></div>
+          <div class="stat"><label>Listings</label><span id="statListings">—</span></div>
+          <div class="stat"><label>Inventory</label><span id="statInventory">—</span></div>
         </div>
-      </div>
-      <aside class="heroPanel">
-        <span id="modeBadge" class="bigBadge">Loading…</span>
-        <small id="heroHint">Manual approval by default. No live accept/confirm unless you enable it.</small>
-      </aside>
-    </section>
-
-    <section class="grid dashboardGrid advancedSection">
-      <article class="card statusCard autonomyStatusCard"><p class="eyebrow">Autonomy</p><div id="autonomyStatus">Loading autonomy…</div></article>
-      <article class="card statusCard"><p class="eyebrow">Autopilot pipeline</p><div id="autopilot">Loading…</div></article>
-      <article class="card statusCard"><p class="eyebrow">Hub status</p><div id="status">Loading…</div></article>
-      <article class="card statusCard buildAuditCard"><p class="eyebrow">Build audit</p><div id="versionAudit">Loading build audit…</div></article>
-      <article class="card statusCard diagnosticBundleCard"><p class="eyebrow">Diagnostic bundle</p><div id="diagnosticBundleStatus">One click runs the full safe pipeline and downloads an assistant-ready redacted report.</div></article>
-      <article class="card statusCard approvedLifecycleCard"><p class="eyebrow">Approved lifecycle</p><div id="approvedLifecycleStatus">No approved lifecycle yet.</div></article>
-      <article class="card statusCard listingDraftPreviewCard"><p class="eyebrow">Listing draft preview</p><div class="cardMiniActions"><button id="buildListingDraftPreview">Build draft preview</button></div><div id="listingDraftPreview">No listing draft preview yet.</div></article>
-      <article class="card statusCard listingDraftReviewCard"><p class="eyebrow">Listing draft review</p><div class="cardMiniActions"><button id="buildListingDraftReview">Build draft review</button></div><div id="listingDraftReview">No listing draft review yet.</div></article>
-      <article class="card statusCard listingDraftPolicyCard"><p class="eyebrow">Draft policy & limits</p><div class="cardMiniActions"><button id="buildListingDraftPolicy">Build policy check</button></div><div id="listingDraftPolicy">No draft policy check yet.</div></article>
-      <article class="card statusCard localDraftApprovalCard"><p class="eyebrow">Local draft approval</p><div id="localDraftApproval">No local draft approval yet.</div></article>
-      <article class="card statusCard payloadPreviewCard"><p class="eyebrow">Backpack.tf payload preview</p><div id="backpackPayloadPreview">No payload preview yet.</div></article>
-      <article class="card statusCard payloadReviewCard"><p class="eyebrow">Payload review & publish guard</p><div id="backpackPayloadReview">No payload review yet.</div></article>
-      <article class="card statusCard payloadLocalApprovalCard"><p class="eyebrow">Local payload approval</p><div id="backpackPayloadLocalApproval">No local payload approval yet.</div></article>
-      <article class="card statusCard guardedPublishDryRunCard"><p class="eyebrow">Guarded publish dry run</p><div id="guardedPublishDryRun">No guarded publish dry run yet.</div></article>
-      <article class="card statusCard publishReadinessGateCard"><p class="eyebrow">Publish readiness gate</p><div class="cardMiniActions"><button id="buildPublishReadinessGate">Build readiness gate</button></div><div id="publishReadinessGate">No publish readiness gate yet.</div></article>
-      <article class="card statusCard publishHandoffCard"><p class="eyebrow">Publish handoff</p><div class="cardMiniActions"><button id="buildPublishHandoff">Build handoff</button></div><div id="publishHandoff">No publish handoff package yet.</div></article>
-      <article class="card statusCard diagnosticTriageCard"><p class="eyebrow">Diagnostic triage</p><div class="cardMiniActions"><button id="buildDiagnosticTriage">Build triage</button></div><div id="diagnosticTriage">No diagnostic triage yet.</div></article>
-      <article class="card statusCard"><p class="eyebrow">Backpack.tf</p><div id="backpack">Loading…</div></article>
-      <article class="card statusCard"><p class="eyebrow">Inventory</p><div id="inventoryStatus">Loading…</div></article>
-      <article class="card statusCard"><p class="eyebrow">SDA Bridge</p><div id="sdaBridge">Loading…</div></article>
-    </section>
-
-    <section class="card brainCard advancedSection">
-      <div class="cardHead split">
-        <div><p class="eyebrow">Trading Brain</p><h2>Recommendations & next safe actions</h2></div>
-        <details class="softDetails inlineAdvanced"><summary>Advanced</summary><div class="buttonRow"><button id="buildBrain">Build brain only</button><button id="buildExecutionQueue">Rebuild queue only</button></div></details>
-      </div>
-      <div id="tradingBrain">No brain snapshot yet.</div>
-      <details class="softDetails"><summary>Brain technical details</summary><pre id="brainRaw"></pre></details>
-    </section>
-
-
-    <section class="card actionablePlanCard">
-      <div class="cardHead split">
-        <div><p class="eyebrow">Actionable Trading Plan</p><h2>What should I do next?</h2></div>
-        <details class="softDetails inlineAdvanced"><summary>Advanced</summary><div class="buttonRow"><button id="buildActionablePlan">Rebuild plan only</button></div></details>
-      </div>
-      <div id="actionablePlan">No actionable plan yet.</div>
-      <details class="softDetails"><summary>Action plan technical details</summary><pre id="actionableRaw"></pre></details>
-    </section>
-
-    <section class="card setupCard" id="setupCard">
-      <div class="cardHead split">
-        <div><p class="eyebrow">Readiness</p><h2>Main account workflow</h2></div>
-        <div class="buttonRow"><button id="loadSetup">Refresh setup</button><button id="saveMainProfile">Save main account</button></div>
-      </div>
-      <div class="setupInline">
-        <label>Main label<input id="mainLabel" placeholder="Main account"></label>
-        <label>SteamID64<input id="mainSteamId" placeholder="7656119…"></label>
-        <label>Scope<input id="accountScope" placeholder="main_only" disabled></label>
-      </div>
-      <div id="setupStatus" class="setupSteps">Loading setup…</div>
-    </section>
-
-    <section class="card accountsCard simplifiedAccountCard">
-      <div class="cardHead split">
-        <div><p class="eyebrow">Main account</p><h2>Account & provider credentials</h2></div>
-        <div class="buttonRow"><button id="refreshCredentials">Refresh</button><button id="saveCredentials" class="primary">Save main account</button></div>
-      </div>
-      <p class="muted">Live publishing uses only this one active account. Multi-account roles are hidden in Advanced so they do not get in the way.</p>
-      <div class="credentialGrid roleCredentialGrid simpleCredentialGrid">
-        <label class="advancedMultiOnly">Credential target<select id="credentialAccountId"><option value="main">Main account</option></select></label>
-        <label>SteamID64<input id="credentialSteamId" placeholder="7656119…"></label>
-        <label>Steam Web API key<input id="steamApiKey" type="password" autocomplete="off" placeholder="Paste Steam Web API key"></label>
-        <label>Backpack.tf access token<input id="backpackAccessToken" type="password" autocomplete="off" placeholder="Paste Backpack.tf access token"></label>
-        <label>Backpack.tf API key<input id="backpackApiKey" type="password" autocomplete="off" placeholder="Paste Backpack.tf API key for prices"></label>
-      </div>
-      <div class="buttonRow secretActions"><button id="clearSteamApi" class="dangerSoft">Clear Steam key</button><button id="clearBackpackToken" class="dangerSoft">Clear Backpack token/key</button></div>
-      <div id="credentialStatus" class="accountCards simplifiedAccountStatus">Loading account status…</div>
-      <details class="softDetails advancedAccountTools"><summary>Advanced multi-account tools</summary>
-        <p class="muted">Only use this if you really want extra storage/trade profiles later. The current live publish flow always uses Main.</p>
-        <div class="credentialGrid addAccountGrid">
-          <label>Account ID<input id="subAccountId" placeholder="storage_1"></label>
-          <label>Label<input id="subAccountLabel" placeholder="Storage account"></label>
-          <label>SteamID64<input id="subAccountSteamId" placeholder="7656119…"></label>
-          <label>Role<select id="subAccountRole"><option value="storage">Storage</option><option value="trade">Trade</option><option value="flip">Flip</option><option value="buffer">Buffer</option><option value="disabled">Disabled</option></select></label>
-          <button id="saveSubAccount" class="primary">Create account card</button>
+        <div class="error-text hidden" id="loginError"></div>
+        <div class="btn-row">
+          <button id="btnLogin" class="primary">Connect</button>
+          <button id="btnDisconnect">Disconnect</button>
+          <button id="btnSyncOffers">Sync offers</button>
         </div>
-        <div id="advancedAccountList" class="accountCards"></div>
-      </details>
-      <details class="softDetails"><summary>Provider sync output</summary><pre id="syncOutput"></pre></details>
-    </section>
+      </section>
+    </div>
 
-    <section class="grid two engineTradeGrid advancedSection">
-      <article class="card focus">
-        <div class="cardHead split"><div><p class="eyebrow">Backpack.tf engine</p><h2>Market scanner & targets</h2></div><div class="buttonRow"><button id="buildScanner">Build scanner</button><button id="buildCore">Build core</button></div></div>
-        <div id="tradingCore">Loading core…</div>
-        <div class="inventoryBox"><h3>Inventory snapshot</h3><div id="inventory">No inventory cache yet.</div></div>
-        <div class="scannerBox"><h3>Market target scanner</h3><div id="scanner">No scanner snapshot yet.</div></div>
-        <div class="grid two inner"><div><h3>Pricing Brain</h3><div id="pricing">No pricing report yet.</div></div><div><h3>Targeted Buy Orders</h3><div id="orders">No orders yet.</div></div></div>
-        <details class="softDetails"><summary>Listing plan / lifecycle output</summary><pre id="listingPlan"></pre></details>
-      </article>
-
-      <article class="card focus">
-        <div class="cardHead split"><div><p class="eyebrow">Trade control</p><h2>Decision queue</h2></div><div class="buttonRow"><button id="acceptRecommended">Accept recommended now</button><button id="acceptAndConfirm" class="dangerSoft">Accept + SDA confirm</button></div></div>
-        <div id="approval">Loading automation…</div>
-        <div id="prepared">No prepared offer yet.</div>
-        <div id="decisions" class="decisionList">No decisions yet.</div>
-      </article>
-    </section>
-
-    <section class="grid two operationsQueueGrid">
-      <article class="card focus">
-        <div class="cardHead split"><div><p class="eyebrow">Guarded queue</p><h2>Execution Queue</h2></div><button id="refreshExecutionQueue">Refresh queue</button></div>
-        <p class="muted">Queue only. Live execution remains disabled unless explicit safety settings are enabled.</p>
-        <div id="executionQueue">No queue yet.</div>
-      </article>
-      <article class="card focus">
-        <div class="cardHead split"><div><p class="eyebrow">Planning</p><h2>Storage & listings</h2></div><div class="buttonRow"><button id="buildTransfers">Build transfer plan</button><button id="buildListingsPlan">Build listings plan</button></div></div>
-        <div id="transferPlan">No storage transfer plan yet.</div>
-        <hr>
-        <div id="listingsPlanMode">No listing plan yet.</div>
-      </article>
-    </section>
-
-    <section class="card sdaSidekick"><div class="cardHead split"><div><p class="eyebrow">Side helper only</p><h2>SDA Bridge integration</h2></div><div class="buttonRow"><button id="checkSdaBridge">Check SDA Bridge</button><button id="loadSdaConfirmations">Load confirmations</button><button id="confirmAcceptRecommendedSda" class="primary">Confirm recommended trades</button></div></div><p class="muted">The hub only asks SDA Bridge to confirm known trade offer IDs. Login/account/market confirmations are not handled by Trade Hub.</p><div id="sdaDetails" class="metrics muted">Check SDA Bridge first.</div><details class="softDetails"><summary>SDA output</summary><pre id="sdaOutput"></pre></details></section>
-
-    <section class="grid two"><article class="card"><div class="cardHead split"><h2>Action Feed</h2><button id="refreshFeed">Refresh</button></div><div id="actionFeed" class="feed">No feed yet.</div></article><article class="card"><div class="cardHead split"><h2>Logs</h2><div class="buttonRow"><button id="loadPlan">Load listing plan</button><button id="loadAcceptLog">Accept log</button><button id="loadAudit">Audit</button></div></div><pre id="logs"></pre></article></section>
-
-    <!-- 5.13.44 – Local Workflow + Release Check -->
-    <section class="grid two workflowGrid">
-      <article class="card">
-        <div class="cardHead split"><div><p class="eyebrow">5.13.44</p><h2>Local Workflow</h2></div><div class="buttonRow"><button id="runLocalWorkflow" class="primary">▶ Run Local Workflow</button></div></div>
-        <p class="muted">Runs: provider sync → inventory sync → market scanner → planning queue → listing drafts → diagnostic triage.</p>
-        <div id="localWorkflow">Not run yet.</div>
-      </article>
-      <article class="card">
-        <div class="cardHead split"><div><p class="eyebrow">5.13.44</p><h2>Release Check</h2></div><div class="buttonRow"><button id="runReleaseCheck">Run Release Check</button><button id="runForbiddenFieldsAudit">Removed Field Audit</button></div></div>
-        <div id="releaseCheck">Not run yet.</div>
-      </article>
-    </section>
-
-    <!-- 5.13.44 – Production dashboard -->
-    <section class="card productionDashboardSection">
-      <div class="cardHead split">
-        <div><p class="eyebrow">Production</p><h2>Trading dashboard</h2></div>
-        <div class="buttonRow"><button id="prodRunLocalWorkflowTop">Run workflow</button><button id="prodRunMaintainerNowTop" class="primary">Maintain now</button><button id="refreshPublishWizardTop">Refresh</button></div>
+    <!-- Trade offers -->
+    <section class="card" id="offersCard">
+      <h2>Pending trade offers <span class="count" id="offerCount">0</span></h2>
+      <div id="offerList" class="offer-list">
+        <p class="empty">No pending offers.</p>
       </div>
-      <p class="muted">Main view shows only the live loop: account readiness, maintainer state, active listings, bought-item auto-sell and recent problems. Manual test tools are hidden in Advanced.</p>
-      <div id="liveDashboardStatus" class="liveDashboardStatus">Live dashboard waiting for first update…</div>
-      <div id="publishWizard">Loading production dashboard…</div>
     </section>
 
-    <section class="card opportunitiesAdvancedSection advancedSection">
-      <div class="cardHead split"><div><p class="eyebrow">Advanced scoring</p><h2>Opportunities</h2></div><div class="buttonRow"><button id="refreshOpportunities">Refresh Opportunities</button></div></div>
-      <div id="opportunitiesFinal">No scored opportunities yet.</div>
+    <!-- Listings -->
+    <section class="card" id="listingsCard">
+      <div class="card-head">
+        <h2>Backpack.tf listings</h2>
+        <button id="btnSyncListings">Refresh</button>
+      </div>
+      <div id="listingList" class="listing-list">
+        <p class="empty">No listings loaded.</p>
+      </div>
     </section>
 
-    <!-- 5.12.34 – Planning Queue -->
-    <section class="card planningQueueSection">
-      <div class="cardHead split"><div><p class="eyebrow">Step 1: Scan → Approve</p><h2>Planning Queue</h2></div></div>
-      <p class="muted">Items come from the market scanner. Approve locally, then build listing drafts below.</p>
-      <div id="planningQueue">No planning queue yet. Run Local Workflow.</div>
+    <!-- Inventory -->
+    <section class="card" id="inventoryCard">
+      <div class="card-head">
+        <h2>Inventory <span class="count" id="invCount">0</span></h2>
+        <button id="btnSyncInventory">Refresh</button>
+      </div>
+      <div id="inventoryGrid" class="inventory-grid">
+        <p class="empty">Inventory not loaded.</p>
+      </div>
     </section>
 
-    <!-- 5.13.44 – Hub Listing Drafts + Guarded Publish Executor -->
-    <section class="card listingDraftsSection">
-      <div class="cardHead split"><div><p class="eyebrow">Step 2: Draft → Publish</p><h2>Listing Drafts</h2></div></div>
-      <p class="muted">Build drafts from approved items. Test the redacted publish payload first, then optionally publish exactly one approved draft to Backpack.tf (requires <code>allow_guarded_backpack_publish: true</code> in add-on options).</p>
-      <div id="hubListingDrafts">No listing drafts yet. Approve queue items then build drafts.</div>
+    <!-- Credentials -->
+    <section class="card" id="credsCard">
+      <h2>Credentials</h2>
+      <form id="credsForm">
+        <div class="form-grid">
+          <label>Steam username
+            <input type="text" name="username" autocomplete="off" placeholder="your_account_name">
+          </label>
+          <label>Steam password
+            <input type="password" name="password" autocomplete="new-password" placeholder="••••••••">
+          </label>
+          <label>Shared secret (2FA)
+            <input type="text" name="shared_secret" autocomplete="off" placeholder="base64…">
+          </label>
+          <label>Identity secret (confirmations)
+            <input type="text" name="identity_secret" autocomplete="off" placeholder="base64…">
+          </label>
+          <label>Steam Web API key
+            <input type="text" name="steam_api_key" autocomplete="off" placeholder="32-char hex">
+          </label>
+          <label>Steam ID64
+            <input type="text" name="steam_id" autocomplete="off" placeholder="76561198…">
+          </label>
+          <label class="full">Backpack.tf token
+            <input type="text" name="bptf_token" autocomplete="off" placeholder="…">
+          </label>
+        </div>
+        <div class="btn-row">
+          <button type="submit" class="primary">Save credentials</button>
+        </div>
+        <p class="save-status hidden" id="credsSaveStatus"></p>
+      </form>
     </section>
 
-    <section class="grid two mutedTools"><article class="card"><div class="cardHead"><h2>Strategy / Accounts</h2></div><div id="strategy">Loading…</div><div id="accounts"></div></article><article class="card"><div class="cardHead split"><h2>Data tools</h2><div class="buttonRow"><button id="loadDataStatus">Data status</button><button id="runMigration">Migrate/check</button><button id="exportData">Export redacted</button></div></div><pre id="dataStatus"></pre></article></section>
+    <!-- Event log -->
+    <section class="card" id="eventsCard">
+      <div class="card-head">
+        <h2>Event log</h2>
+        <button id="btnClearLog">Clear</button>
+      </div>
+      <div id="eventLog" class="event-log"></div>
+    </section>
+
   </main>
+
   <script src="./app.js"></script>
 </body>
 </html>
