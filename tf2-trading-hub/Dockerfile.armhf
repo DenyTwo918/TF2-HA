@@ -1,12 +1,12 @@
 FROM ghcr.io/home-assistant/armhf-base:latest
 
-ARG BUILD_VERSION=5.13.57
+ARG BUILD_VERSION=5.13.58
 ARG BUILD_ARCH=armhf
 
 LABEL io.hass.name="TF2 Trading Hub" \
-      io.hass.description="Backpack.tf-first TF2 trading cockpit with optional SDA Bridge integration" \
+      io.hass.description="Minimal safe TF2 Trading Hub with manual maintainer control." \
       io.hass.version="${BUILD_VERSION}" \
-      io.hass.type="app" \
+      io.hass.type="addon" \
       io.hass.arch="armhf" \
       org.opencontainers.image.source="https://github.com/DenyTwo918/TF2-HA"
 

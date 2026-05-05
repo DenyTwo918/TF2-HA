@@ -1,6 +1,6 @@
 {
   "name": "tf2-trading-hub",
-  "version": "5.13.57",
+  "version": "5.13.58",
   "description": "Minimal safe TF2 Trading Hub with controlled fill one",
   "main": "dist/server.js",
   "scripts": {
