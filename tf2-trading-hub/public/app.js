@@ -53,6 +53,7 @@ const STATUS_CLASS = {
   offline:     'offline',
   error:       'error',
   needs_2fa:   'warn',
+  throttled:   'error',
 };
 
 function renderStatus(data) {
@@ -71,7 +72,7 @@ function renderStatus(data) {
   const errEl = qs('#loginError');
   if (errEl) {
     if (data.login_error) {
-      errEl.textContent = data.login_error;
+      errEl.textContent = data.login_error + (data.throttle_until ? ` Retry after: ${new Date(data.throttle_until).toLocaleTimeString()}` : '');
       errEl.classList.remove('hidden');
     } else {
       errEl.classList.add('hidden');
@@ -378,6 +379,19 @@ document.addEventListener('DOMContentLoaded', () => {
   qs('#btnCancelSteamGuard')?.addEventListener('click', async () => {
     await api('/api/steamguard/cancel', { method: 'POST' }).catch(() => {});
     loadStatus();
+  });
+
+  qs('#btnClearSecrets')?.addEventListener('click', async () => {
+    if (!confirm('Clear stored shared_secret and identity_secret from addon data?')) return;
+    const status = qs('#credsSaveStatus');
+    try {
+      await api('/api/credentials/clear-secrets', { method: 'POST' });
+      if (status) { status.textContent = 'Steam 2FA secrets cleared. Manual phone code mode is active.'; status.classList.remove('hidden'); }
+      addLog('warn', 'Steam secrets cleared');
+      loadStatus();
+    } catch (err) {
+      if (status) { status.textContent = 'Error: ' + err.message; status.classList.remove('hidden'); }
+    }
   });
 
   // Buttons

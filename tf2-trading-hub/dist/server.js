@@ -11,7 +11,7 @@ const { EventEmitter } = require('events');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const VERSION  = '5.13.61';
+const VERSION  = '5.13.62';
 const PORT     = Number(process.env.PORT  || 8099);
 const DATA_DIR = process.env.DATA_DIR    || '/data';
 
@@ -65,13 +65,36 @@ function getOptions() { return readJson(P.options, {}); }
 
 function loadCreds() { return readJson(P.creds, {}); }
 
+function normalizeCredValue(field, value) {
+  if (value === undefined || value === null) return undefined;
+  const v = String(value).trim();
+  if (!v) return undefined;
+
+  // UI placeholders must never become real credentials.
+  const placeholders = new Set(['base64…','base64...','32-char hex','76561198…','76561198...','…','...','••••••••','your_account_name']);
+  if (placeholders.has(v)) return undefined;
+
+  // Basic shape validation prevents accidental lockouts from placeholder/bad TOTP secrets.
+  if ((field === 'shared_secret' || field === 'identity_secret') && !/^[A-Za-z0-9+/=]{20,}$/.test(v)) return undefined;
+  if (field === 'steam_api_key' && !/^[a-fA-F0-9]{32}$/.test(v)) return undefined;
+  if (field === 'steam_id' && !/^7656119[0-9]{10}$/.test(v)) return undefined;
+  return v;
+}
+
 function saveCreds(patch) {
   const cur = loadCreds();
   const next = { ...cur };
   const FIELDS = ['username','password','shared_secret','identity_secret',
                   'steam_api_key','bptf_token','steam_id'];
+
+  const clear = Array.isArray(patch.clear_fields) ? patch.clear_fields : [];
+  for (const f of clear) {
+    if (FIELDS.includes(f)) delete next[f];
+  }
+
   for (const f of FIELDS) {
-    if (patch[f] !== undefined && patch[f] !== '') next[f] = patch[f];
+    const v = normalizeCredValue(f, patch[f]);
+    if (v !== undefined) next[f] = v;
   }
   writeJson(P.creds, next);
   return next;
@@ -94,7 +117,7 @@ function credStatus() {
 // ─── Bot state ────────────────────────────────────────────────────────────────
 
 const bot = {
-  status:      'offline',   // offline | connecting | online | error | needs_2fa
+  status:      'offline',   // offline | connecting | online | error | needs_2fa | throttled
   loginError:  null,
   steamId:     null,
   displayName: null,
@@ -113,6 +136,7 @@ let community = null;
 let manager   = null;
 let reconnectTimer = null;
 let pendingSteamGuard = null; // { callback, requestedAt, lastCodeWrong }
+let loginBackoffUntil = 0;
 
 function steamGuardStatus() {
   return {
@@ -318,6 +342,10 @@ function buildSteamClients() {
 
   client.on('error', err => {
     pendingSteamGuard = null;
+    if (isThrottleError(err)) {
+      setLoginThrottle(60);
+      return;
+    }
     bot.status     = 'error';
     bot.loginError = err.message;
     log('error', 'steam_client_error', { message: err.message, eresult: err.eresult });
@@ -327,10 +355,10 @@ function buildSteamClients() {
 
   client.on('disconnected', (eresult, msg) => {
     pendingSteamGuard = null;
-    bot.status = 'offline';
+    if (bot.status !== 'throttled') bot.status = 'offline';
     log('warn', 'steam_disconnected', { eresult, msg });
     bus.emit('status');
-    scheduleReconnect();
+    if (bot.status !== 'throttled') scheduleReconnect();
   });
 
   // ── Manager events ─────────────────────────────────────────────────────────
@@ -369,6 +397,7 @@ function buildSteamClients() {
 }
 
 function scheduleReconnect(delayMs = 30000) {
+  if (loginBackoffUntil && Date.now() < loginBackoffUntil) return;
   if (reconnectTimer) return;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
@@ -377,6 +406,14 @@ function scheduleReconnect(delayMs = 30000) {
 }
 
 async function tryLogin() {
+  if (loginBackoffUntil && Date.now() < loginBackoffUntil) {
+    bot.status = 'throttled';
+    bot.loginError = `Steam login is temporarily throttled. Wait until ${new Date(loginBackoffUntil).toLocaleTimeString()} before connecting again.`;
+    bus.emit('status');
+    return;
+  }
+  if (loginBackoffUntil && Date.now() >= loginBackoffUntil) loginBackoffUntil = 0;
+
   const c = loadCreds();
   if (!c.username || !c.password) {
     log('info', 'login_skipped_no_credentials', {});
@@ -488,6 +525,7 @@ app.get('/api/status', (req, res) => {
     steam_id:        bot.steamId,
     display_name:    bot.displayName,
     login_error:     bot.loginError,
+    throttle_until:  loginBackoffUntil ? new Date(loginBackoffUntil).toISOString() : null,
     steam_guard:     steamGuardStatus(),
     offer_queue:     bot.offerQueue.length,
     listing_count:   bot.listings.length,
@@ -513,6 +551,13 @@ app.post('/api/credentials', wrap(async (req, res) => {
   if (bot.status === 'offline' || bot.status === 'error') {
     tryLogin().catch(() => {});
   }
+  res.json({ ok: true, ...credStatus() });
+}));
+
+app.post('/api/credentials/clear-secrets', wrap(async (_req, res) => {
+  saveCreds({ clear_fields: ['shared_secret', 'identity_secret'] });
+  pendingSteamGuard = null;
+  log('warn', 'steam_secrets_cleared', {});
   res.json({ ok: true, ...credStatus() });
 }));
 
