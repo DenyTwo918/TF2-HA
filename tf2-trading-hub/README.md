@@ -1,6 +1,6 @@
 # TF2 Trading Hub
 
-Version **5.13.68** adds a Home Assistant friendly multi-account TF2 trading cockpit.
+Version **5.13.69** adds a Home Assistant friendly multi-account TF2 trading cockpit.
 
 ## Highlights
 

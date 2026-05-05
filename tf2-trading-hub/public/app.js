@@ -1,7 +1,7 @@
 'use strict';
 
 const state = {
-  version: '5.13.68',
+  version: '5.13.69',
   accounts: [],
   selected: 'main',
   selectedStatus: null,
@@ -177,7 +177,7 @@ async function loadSelectedData() {
 function renderOffers() {
   const box = $('offerList');
   $('offerCount').textContent = state.offers.length;
-  if (!state.offers.length) { box.innerHTML = `<div class="empty">No pending trade offers. Manual review queue is clean.</div>`; return; }
+  if (!state.offers.length) { box.innerHTML = `<div class="empty-state">No pending trade offers. Manual review queue is clean.</div>`; return; }
   box.innerHTML = state.offers.map(o => `<article class="offer-card"><div><strong>Offer ${esc(o.id)}</strong><p>Partner ${esc(o.partner || 'unknown')}</p><p>${esc(o.evaluation?.decision || 'manual_review')} · profit ${Number(o.evaluation?.profit_ref || 0).toFixed(2)} ref</p></div><div><button class="btn btn-primary btn-small" data-offer="accept:${esc(o.id)}">Accept</button><button class="btn btn-ghost btn-small" data-offer="decline:${esc(o.id)}">Decline</button></div></article>`).join('');
 }
 
@@ -187,7 +187,7 @@ function renderListings(payload = {}) {
   const d = payload?.diagnostic || currentAccount()?.backpack;
   if (d) { diag.classList.remove('hidden'); diag.innerHTML = `<strong>Backpack status: ${esc(d.status || 'not_checked')}</strong><br>${esc(d.message || '')}`; }
   else diag.classList.add('hidden');
-  if (!state.listings.length) { box.innerHTML = `<div class="empty">No active listings for this account. Generate drafts from inventory or check Backpack diagnostics.</div>`; return; }
+  if (!state.listings.length) { box.innerHTML = `<div class="empty-state">No active listings for this account. Generate drafts from inventory or check Backpack diagnostics.</div>`; return; }
   box.innerHTML = state.listings.map(l => `<article class="list-row"><strong>${esc(l.item_name)}</strong><span>${esc(l.intent)} · ${esc(JSON.stringify(l.currencies || {}))}</span></article>`).join('');
 }
 
@@ -197,7 +197,7 @@ function renderInventory(payload = {}) {
   info.classList.remove('hidden');
   info.innerHTML = `<strong>Inventory source:</strong> ${esc(payload?.source || currentAccount()?.inventory_source || 'not synced')} · <strong>Pricing:</strong> ${esc(state.pricing.status || 'not loaded')}`;
   $('invCount').textContent = state.inventory.length;
-  if (!state.inventory.length) { box.innerHTML = `<div class="empty">Inventory is empty or not loaded yet.</div>`; return; }
+  if (!state.inventory.length) { box.innerHTML = `<div class="empty-state">Inventory is empty or not loaded yet.</div>`; return; }
   box.innerHTML = state.inventory.map(i => `<article class="item-card"><div class="item-icon">${esc((i.name || '?').slice(0,2).toUpperCase())}</div><strong>${esc(i.name)}</strong><span>${esc(i.quality || 'Unique')}</span></article>`).join('');
 }
 
@@ -209,13 +209,13 @@ function priceText(p) {
 function renderDrafts() {
   const box = $('draftList');
   $('draftCount').textContent = state.drafts.length;
-  if (!state.drafts.length) { box.innerHTML = `<div class="empty">No listing drafts yet. Run Generate drafts after inventory sync.</div>`; return; }
-  box.innerHTML = state.drafts.map(d => `<article class="list-row draft-row"><div><strong>${esc(d.name || d.market_hash_name)}</strong><span>${esc(d.status)} · ${esc(d.confidence)} · ${esc(priceText(d.suggested_price))}</span>${d.warnings?.length ? `<small>${esc(d.warnings.join(', '))}</small>` : ''}</div><div><button class="btn btn-primary btn-small" data-draft="publish:${esc(d.draft_id)}">Publish</button><button class="btn btn-ghost btn-small" data-draft="ignore:${esc(d.draft_id)}">Ignore</button></div></article>`).join('');
+  if (!state.drafts.length) { box.innerHTML = `<div class="empty-state">No listing drafts yet. Run Generate drafts after inventory sync.</div>`; return; }
+  box.innerHTML = state.drafts.map(d => `<article class="list-row draft-row"><div class="draft-main"><strong>${esc(d.name || d.market_hash_name)}</strong><div class="draft-meta"><span class="pill ${esc(d.status || 'needs_price')}">${esc(d.status)}</span><span>${esc(d.confidence)}</span><span>${esc(priceText(d.suggested_price))}</span></div>${d.warnings?.length ? `<small>${esc(d.warnings.join(', '))}</small>` : ''}</div><div class="draft-actions"><button class="btn btn-primary btn-small" data-draft="publish:${esc(d.draft_id)}">Publish</button><button class="btn btn-ghost btn-small" data-draft="ignore:${esc(d.draft_id)}">Ignore</button></div></article>`).join('');
 }
 
 function renderEvents() {
   const box = $('eventList');
-  box.innerHTML = state.events.slice(0, 120).map(e => `<div class="event"><time>${fmtTime(e.ts)}</time><span class="pill ${e.level || 'info'}">${esc(e.level || 'info')}</span><strong>${esc(e.event)}</strong><small>${esc(e.account_id || '')}</small></div>`).join('') || `<div class="empty">No events yet.</div>`;
+  box.innerHTML = state.events.slice(0, 120).map(e => `<div class="log-line ${esc(e.level || 'info')}"><span>${fmtTime(e.ts)}</span><strong>${esc(e.level || 'info')}</strong><p>${esc(e.event)}${e.account_id ? ` · ${esc(e.account_id)}` : ''}</p></div>`).join('') || `<div class="empty-state">No events yet.</div>`;
 }
 
 async function loadEvents() {

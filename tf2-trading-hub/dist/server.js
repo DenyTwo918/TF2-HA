@@ -9,7 +9,7 @@ const fs = require("fs");
 const path = require("path");
 const { EventEmitter } = require("events");
 
-const VERSION = "5.13.68";
+const VERSION = "5.13.69";
 const PORT = Number(process.env.PORT || 8099);
 const DATA_DIR = process.env.DATA_DIR || "/data";
 const ACCOUNTS_DIR = path.join(DATA_DIR, "accounts");
@@ -445,42 +445,128 @@ async function refreshPriceSchema({ force = false, accountId = null } = {}) {
 }
 
 function parseCurrencyPrice(raw) {
-  if (!raw) return null;
+  if (raw === null || raw === undefined || raw === "") return null;
   if (typeof raw === "number") return { metal: raw, keys: 0, text: `${raw} ref` };
+  if (typeof raw === "string") return { keys: 0, metal: 0, text: raw };
   if (typeof raw === "object") {
-    const keys = Number(raw.keys || raw.key || 0);
-    const metal = Number(raw.metal || raw.refined || raw.value || 0);
-    return { keys, metal, text: `${keys ? `${keys} key${keys === 1 ? "" : "s"} ` : ""}${metal ? `${metal} ref` : ""}`.trim() || "0 ref" };
+    const currency = String(raw.currency || raw.curr || "").toLowerCase();
+    const value = Number(raw.value ?? raw.price ?? 0);
+    const keys = Number(raw.keys ?? raw.key ?? (currency === "keys" || currency === "key" ? value : 0));
+    const metal = Number(raw.metal ?? raw.refined ?? (currency === "metal" || currency === "ref" || currency === "refined" ? value : 0));
+    const text = `${keys ? `${keys} key${keys === 1 ? "" : "s"} ` : ""}${metal ? `${metal} ref` : ""}`.trim();
+    return { keys, metal, text: text || (value ? `${value} ${currency || "ref"}` : "0 ref") };
   }
-  return { keys: 0, metal: 0, text: String(raw) };
+  return null;
+}
+
+const QUALITY_IDS = {
+  Normal: "0",
+  Genuine: "1",
+  Vintage: "3",
+  Unusual: "5",
+  Unique: "6",
+  Community: "7",
+  Valve: "8",
+  SelfMade: "9",
+  "Self-Made": "9",
+  Strange: "11",
+  Haunted: "13",
+  Collectors: "14",
+  "Collector's": "14",
+  Decorated: "15",
+};
+
+function normalizePriceName(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/^the\s+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function schemaItemsAsArray(schema) {
+  const source = schema?.response?.items || schema?.items || schema?.response || schema;
+  if (!source) return [];
+  if (Array.isArray(source)) {
+    return source.map((item, index) => ({
+      key: item?.name || item?.item_name || item?.market_hash_name || item?.market_name || String(index),
+      item,
+    }));
+  }
+  if (typeof source === "object") {
+    return Object.entries(source).map(([key, item]) => ({
+      key: item?.name || item?.item_name || item?.market_hash_name || item?.market_name || key,
+      item,
+    }));
+  }
+  return [];
+}
+
+function priceEntriesFromNode(node) {
+  if (node === null || node === undefined) return [];
+  if (typeof node === "number" || typeof node === "string") return [node];
+  if (Array.isArray(node)) return node.flatMap(priceEntriesFromNode).filter(v => v !== null && v !== undefined);
+  if (typeof node !== "object") return [];
+  if (node.value !== undefined || node.price !== undefined || node.currency || node.keys !== undefined || node.metal !== undefined || node.refined !== undefined) return [node];
+  const preferred = [
+    node.Tradable?.Craftable,
+    node.Tradable?.NonCraftable,
+    node.tradable?.craftable,
+    node.tradable?.noncraftable,
+    node.Craftable,
+    node.NonCraftable,
+    node.craftable,
+    node.noncraftable,
+    node.Tradable,
+    node.tradable,
+  ].filter(v => v !== undefined);
+  for (const candidate of preferred) {
+    const entries = priceEntriesFromNode(candidate);
+    if (entries.length) return entries;
+  }
+  return Object.values(node).flatMap(priceEntriesFromNode).filter(v => v !== null && v !== undefined);
 }
 
 function lookupPrice(schema, name, quality = "Unique") {
-  const items = schema?.response?.items || schema?.items || {};
-  if (!name || !items || !Object.keys(items).length) return null;
-  const key = Object.keys(items).find(k => k.toLowerCase() === String(name).toLowerCase());
-  if (!key) return null;
-  const item = items[key];
-  const prices = item?.prices || item?.priceindex || item;
-  const qCandidates = [quality, "Unique", "6", Object.keys(prices || {})[0]].filter(Boolean);
+  const collection = schemaItemsAsArray(schema);
+  if (!name || !collection.length) return null;
+  const wanted = normalizePriceName(name);
+  const found = collection.find(({ key, item }) => {
+    const names = [key, item?.name, item?.item_name, item?.market_hash_name, item?.market_name].filter(Boolean);
+    return names.some(n => normalizePriceName(n) === wanted);
+  });
+  if (!found) return null;
+
+  const item = found.item || {};
+  const prices = item.prices || item.priceindex || item.price || item;
+  const qName = String(quality || "Unique");
+  const qId = QUALITY_IDS[qName] || QUALITY_IDS[qName.replace(/\s+/g, "")] || qName;
+  const keys = prices && typeof prices === "object" ? Object.keys(prices) : [];
+  const qCandidates = [...new Set([qName, qId, "Unique", "6", ...keys])].filter(Boolean);
+
   for (const q of qCandidates) {
-    const qData = prices?.[q];
-    const tradable = qData?.Tradable || qData?.tradable || qData;
-    const craftable = tradable?.Craftable || tradable?.craftable || tradable;
-    const entries = Array.isArray(craftable) ? craftable : Object.values(craftable || {}).flat();
-    const entry = entries.find(Boolean);
-    if (entry) {
-      const raw = entry.value !== undefined ? entry.value : entry.price || entry;
+    const qData = prices?.[q] ?? prices?.[String(q)];
+    const entries = priceEntriesFromNode(qData);
+    const entry = entries.find(v => v !== null && v !== undefined);
+    const suggested = parseCurrencyPrice(entry);
+    if (suggested) {
       return {
-        item_name: key,
+        item_name: found.key,
         quality: q,
         raw: entry,
-        suggested: parseCurrencyPrice(raw),
-        confidence: entry.last_update || entry.currency ? "medium" : "low",
+        suggested,
+        confidence: typeof entry === "object" && (entry.last_update || entry.difference || entry.currency) ? "medium" : "low",
       };
     }
   }
-  return { item_name: key, raw: item, suggested: null, confidence: "low" };
+
+  const entries = priceEntriesFromNode(prices);
+  const entry = entries.find(v => v !== null && v !== undefined);
+  const suggested = parseCurrencyPrice(entry);
+  if (suggested) {
+    return { item_name: found.key, quality: qName, raw: entry, suggested, confidence: "low" };
+  }
+  return { item_name: found.key, raw: item, suggested: null, confidence: "low" };
 }
 
 function itemValueRef(item, schema) {

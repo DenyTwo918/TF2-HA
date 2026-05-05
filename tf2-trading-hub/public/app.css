@@ -458,7 +458,7 @@ input:focus { border-color: rgba(56, 189, 248, 0.72); box-shadow: 0 0 0 4px rgba
 .diag-tags span { padding:5px 9px; border-radius:999px; background:rgba(255,255,255,.09); color:rgba(232,239,255,.82); font-size:12px; }
 .inventory-card small { color: rgba(255, 207, 102, .92); font-weight: 700; }
 
-/* 5.13.68 multi-account cockpit additions */
+/* 5.13.69 multi-account cockpit additions */
 .select {
   min-height: 42px;
   border-radius: 14px;
@@ -550,3 +550,11 @@ input:focus { border-color: rgba(56, 189, 248, 0.72); box-shadow: 0 0 0 4px rgba
 @media (max-width: 880px) {
   .account-top, .draft-row { align-items: flex-start; flex-direction: column; }
 }
+
+.empty { border: 1px dashed rgba(148, 163, 184, 0.18); border-radius: 18px; padding: 14px; background: rgba(2, 6, 23, 0.34); color: var(--muted); text-align: center; }
+
+.draft-main { min-width: 0; display: grid; gap: 8px; }
+.draft-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: rgba(226,232,240,.78); font-size: .84rem; }
+.draft-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.pill.ready { color: #bbf7d0; border-color: rgba(34,197,94,.42); background: rgba(34,197,94,.12); }
+.pill.needs_price { color: #fde68a; border-color: rgba(245,158,11,.42); background: rgba(245,158,11,.13); }
