@@ -2,8 +2,24 @@
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 
+function ingressBasePath() {
+  const parts = window.location.pathname.split('/').filter(Boolean);
+  const i = parts.indexOf('hassio_ingress');
+  if (i >= 0 && parts[i + 1]) {
+    return '/' + parts.slice(0, i + 2).join('/');
+  }
+  return '';
+}
+
+const API_BASE = ingressBasePath();
+
+function apiUrl(path) {
+  const clean = String(path || '').startsWith('/') ? String(path) : `/${path}`;
+  return `${API_BASE}${clean}`;
+}
+
 async function api(path, opts = {}) {
-  const r = await fetch(path, {
+  const r = await fetch(apiUrl(path), {
     headers: { 'Content-Type': 'application/json', ...opts.headers },
     ...opts,
   });
@@ -248,7 +264,7 @@ async function loadEvents() {
 // ─── SSE live feed ────────────────────────────────────────────────────────────
 
 function connectSSE() {
-  const es = new EventSource('/api/events/stream');
+  const es = new EventSource(apiUrl('/api/events/stream'));
   es.onmessage = e => {
     let msg;
     try { msg = JSON.parse(e.data); } catch { return; }

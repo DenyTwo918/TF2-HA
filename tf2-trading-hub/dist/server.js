@@ -11,7 +11,7 @@ const { EventEmitter } = require('events');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const VERSION  = '5.13.59';
+const VERSION  = '5.13.60';
 const PORT     = Number(process.env.PORT  || 8099);
 const DATA_DIR = process.env.DATA_DIR    || '/data';
 
