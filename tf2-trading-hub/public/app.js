@@ -2,15 +2,33 @@
 
 // ─── API helper ───────────────────────────────────────────────────────────────
 
+// Resolve API base relative to the current page — works for both direct port and HA ingress.
+// HA ingress serves the app under /api/hassio_ingress/<token>/, so absolute
+// fetch('/api/...') can accidentally hit Home Assistant itself. Keep requests
+// under the same base path as the loaded dashboard.
+function getApiBasePath() {
+  const path = window.location.pathname || '/';
+  if (path.endsWith('/')) return path;
+  const last = path.split('/').pop() || '';
+  if (last.includes('.')) return path.slice(0, path.lastIndexOf('/') + 1) || '/';
+  return `${path}/`;
+}
+
+const API_BASE = getApiBasePath();
+
+function apiUrl(path) {
+  return API_BASE + String(path || '').replace(/^\/+/, '');
+}
+
 async function api(path, opts = {}) {
-  const r = await fetch(path, {
+  const r = await fetch(apiUrl(path), {
     headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
     ...opts,
   });
   const text = await r.text();
   let body;
   try { body = text ? JSON.parse(text) : {}; } catch { body = { error: text }; }
-  if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+  if (!r.ok) throw new Error(body.error || body.message || text || `HTTP ${r.status}`);
   return body;
 }
 
@@ -63,7 +81,7 @@ function renderStatus(data) {
   const statusPill = qs('#statusPill');
   if (statusPill) { statusPill.textContent = data.status || 'offline'; statusPill.className = `pill ${cls}`; }
 
-  setText('sideVersion', data.version || '5.13.67');
+  setText('sideVersion', data.version || '5.13.68');
 
   const connectBtn    = qs('#btnLogin');
   const disconnectBtn = qs('#btnDisconnect');
@@ -689,7 +707,7 @@ async function loadEvents() {
 
 function connectSSE() {
   try {
-    const es = new EventSource('/api/events/stream');
+    const es = new EventSource(apiUrl('/api/events/stream'));
     es.onmessage = e => {
       let msg;
       try { msg = JSON.parse(e.data); } catch { return; }

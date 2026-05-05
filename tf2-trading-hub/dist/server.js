@@ -11,7 +11,7 @@ const { EventEmitter } = require('events');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const VERSION  = '5.13.67';
+const VERSION  = '5.13.68';
 const PORT     = Number(process.env.PORT  || 8099);
 const DATA_DIR = process.env.DATA_DIR    || '/data';
 
@@ -1191,7 +1191,6 @@ async function migrateLegacy() {
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
-app.use(express.static(path.join(__dirname, '..', 'public')));
 
 const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res)).catch(next);
 
@@ -1199,10 +1198,25 @@ function getActiveId(req) {
   return req.params.accountId || req.query.account_id || getMainAccountId();
 }
 
+function listRegisteredRoutes() {
+  try {
+    return (app._router?.stack || [])
+      .filter(layer => layer.route)
+      .flatMap(layer => Object.keys(layer.route.methods || {}).map(method => ({
+        method: method.toUpperCase(),
+        path:   layer.route.path,
+      })))
+      .sort((a, b) => `${a.path} ${a.method}`.localeCompare(`${b.path} ${b.method}`));
+  } catch (err) {
+    return [{ method: 'ERROR', path: err.message }];
+  }
+}
+
 // ── Version & status ──────────────────────────────────────────────────────────
 
 app.get('/api/version',       (_req, res) => res.json({ version: VERSION }));
 app.get('/api/version-audit', (_req, res) => res.json({ ok: true, app_version: VERSION, addon_version: VERSION, server_version: VERSION, package_version: VERSION }));
+app.get('/api/debug/routes',  (_req, res) => res.json({ ok: true, version: VERSION, routes: listRegisteredRoutes() }));
 
 app.get('/api/status', (req, res) => {
   const id   = getActiveId(req);
@@ -1684,6 +1698,24 @@ app.get('/api/diagnostics/bundle', (_req, res) => {
     files: { price_schema_exists: fs.existsSync(G.priceSchema), global_audit_exists: fs.existsSync(G.globalAudit) },
   });
 });
+
+// ── API 404 fallback (keeps API failures JSON and easier to diagnose) ────────
+
+app.use('/api', (req, res) => {
+  const routes = listRegisteredRoutes();
+  log('warn', 'api_route_not_found', { method: req.method, path: req.originalUrl, version: VERSION });
+  res.status(404).json({
+    ok: false,
+    error: `API route not found: ${req.method} ${req.originalUrl}`,
+    version: VERSION,
+    hint: 'If this appears in Home Assistant ingress, refresh/rebuild the add-on and make sure frontend API calls use the ingress base path.',
+    routes,
+  });
+});
+
+// ── Static files (registered after all API routes so API always wins) ─────────
+
+app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // ── Error handler ─────────────────────────────────────────────────────────────
 
