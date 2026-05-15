@@ -1,6 +1,6 @@
 ﻿{
   "name": "tf2-trading-hub-addon",
-  "version": "5.14.1",
+  "version": "5.14.2",
   "private": true,
   "main": "dist/server.js",
   "scripts": {
