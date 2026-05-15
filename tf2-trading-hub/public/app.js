@@ -50,7 +50,6 @@ function setLog(value){
   node.textContent = text;
 }
 function updateSimpleUiButton(){const b=document.getElementById('toggleSimpleUi');if(!b)return;b.textContent=document.body.classList.contains('simple-ui')?'Show advanced UI':'Hide advanced UI';}
-(function initSimpleUi(){try{const forcedKey='tf2_hub_simple_for_5_12_79';if(localStorage.getItem(forcedKey)!=='done'){document.body.classList.add('simple-ui');localStorage.setItem('tf2_hub_ui_mode','simple');localStorage.setItem(forcedKey,'done');}else if(localStorage.getItem('tf2_hub_ui_mode')!=='advanced')document.body.classList.add('simple-ui');setTimeout(updateSimpleUiButton,0);}catch{document.body.classList.add('simple-ui');}})();
 function setSda(value){qs('#sdaOutput').textContent=typeof value==='string'?value:JSON.stringify(value,null,2);}
 function saveJsonDownload(fileName,value){try{const blob=new Blob([JSON.stringify(value,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=fileName||"tf2-hub-diagnostic.json";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);return true;}catch(error){setLog({ok:false,error:'Browser download failed',detail:String(error&&error.message?error.message:error)});return false;}}
 async function downloadCachedDiagnosticFallback(reason){const fallback={ok:false,version:'5.13.49',title:'Client-side diagnostic download fallback',generated_at:new Date().toISOString(),source:'browser_fallback',error:String(reason&&reason.message?reason.message:reason||'Unknown diagnostic download error'),safety_note:'Client fallback only. No live trade, Steam confirmation or Backpack.tf write was executed.'};try{const cached=await api('/api/diagnostics/bundle').catch(()=>null);if(cached&&typeof cached==='object'){cached.client_download_fallback_reason=fallback.error;saveJsonDownload(cached.file_name||('tf2-hub-diagnostic-cached-'+(cached.version||'bundle')+'.json'),cached);return cached;}}catch{}saveJsonDownload('tf2-hub-diagnostic-client-fallback.json',fallback);return fallback;}
@@ -756,11 +755,10 @@ async function saveSelectedCredentials(extra={}){
     const started=performance.now();
     let data;
     try{
-      data=await api('/api/main-account/save-local-only',{method:'POST',body:JSON.stringify(payload),timeoutMs:3000});
+      data=await api('/api/main-account/save-local-only',{method:'POST',body:JSON.stringify(payload),timeoutMs:8000});
     }catch(saveErr){
       const errMsg=saveErr&&saveErr.message?saveErr.message:'Save request failed';
-      const isTimeout=errMsg.includes('timeout')||errMsg.includes('504');
-      setLog({ok:false,error:errMsg,message:isTimeout?'Save timed out — the server may be busy. Try again in a moment.':'Save failed: '+errMsg,trace_id:(saveErr&&saveErr.trace_id)||''});
+      setLog({ok:false,error:errMsg,message:'Save failed: '+errMsg,trace_id:(saveErr&&saveErr.trace_id)||''});
       return null;
     }
     if(!data||!data.ok){
@@ -976,8 +974,7 @@ function renderHubListingDrafts(data){
     html+=`<small>Buy: ${esc2(d.max_buy_ref)} ref &nbsp;|&nbsp; Sell: ${esc2(d.target_sell_ref)} ref &nbsp;|&nbsp; Profit: ${esc2(d.expected_profit_ref)} ref</small><br>`;
     if(d.local_status==='draft'){html+=`<button class="hubDraftApprove" data-id="${esc2(d.draft_id)}" style="font-size:0.8em;background:#2d7a2d;color:#fff;margin-top:4px">Approve Locally</button> `;}
     if(d.local_status==='approved_local'){
-      const payloadStr=d.provider_payload_preview?JSON.stringify(d.provider_payload_preview,null,2):'{}';
-      html+=`<button class="hubDraftCopyPayload" data-payload="${esc2(JSON.stringify(d.provider_payload_preview||{}))}" style="font-size:0.8em;margin-top:4px">Copy Payload</button> `;
+      html+=`<button class="hubDraftCopyPayload" data-payload="${encodeURIComponent(JSON.stringify(d.provider_payload_preview||{}))}" style="font-size:0.8em;margin-top:4px">Copy Payload</button> `;
       html+=`<button class="hubDraftTestPublish" data-id="${esc2(d.draft_id)}" style="font-size:0.8em;margin-top:4px">Test Publish Payload</button> `;
       html+=`<button class="hubDraftDuplicateGuard" data-id="${esc2(d.draft_id)}" style="font-size:0.8em;margin-top:4px">Duplicate Guard</button> `;
       html+=`<button class="hubDraftPublish" data-id="${esc2(d.draft_id)}" style="font-size:0.8em;background:#7a2d00;color:#fff;margin-top:4px">Publish to Backpack.tf</button> `;}
@@ -1012,7 +1009,7 @@ function renderLocalWorkflow(data){
 function renderPublishWizard(data){
   const el=document.getElementById('publishWizard');if(!el)return;
   if(!data||data.error){el.innerHTML=`<p class="muted">${esc2(data&&data.error||'No production dashboard data yet.')}</p>`;return;}
-  if(data.version&&data.ok&&data.steps===undefined&&data.candidate_draft_id===undefined&&data.classifieds_maintainer===undefined){el.innerHTML=`<p class="badText"><b>Production dashboard data mapping mismatch.</b> Refresh response was not /api/publish-wizard/status. Update to 5.13.49 or reload with Ctrl+F5.</p><pre>${esc2(JSON.stringify(data,null,2).slice(0,1000))}</pre>`;return;}
+  if(data.version&&data.ok&&data.steps===undefined&&data.candidate_draft_id===undefined&&data.classifieds_maintainer===undefined&&data.trading_brain_v513===undefined){el.innerHTML=`<p class="badText"><b>Production dashboard data mapping mismatch.</b> Refresh response was not /api/publish-wizard/status. Update to 5.13.49 or reload with Ctrl+F5.</p><pre>${esc2(JSON.stringify(data,null,2).slice(0,1000))}</pre>`;return;}
   const maint=data.classifieds_maintainer||{};
   const autoSell=data.auto_sell_relister||{};
   const manualOwnedSell=data.manual_owned_sell_detector||{};
@@ -1150,7 +1147,16 @@ document.addEventListener('click',async e=>{
   const dc=e.target.closest('.hubDraftCancel');
   if(dc){try{const d=await api(`/api/hub-listing-drafts/${encodeURIComponent(dc.dataset.id)}/cancel`,{method:'POST',body:'{}'});setLog(d);const drafts=await api('/api/hub-listing-drafts');renderHubListingDrafts(drafts);}catch(err){setLog(err.body||err.message);}return;}
   const cp=e.target.closest('.hubDraftCopyPayload');
-  if(cp){try{await navigator.clipboard.writeText(JSON.stringify(JSON.parse(cp.dataset.payload),null,2));setLog({ok:true,msg:'Payload copied to clipboard'});}catch{setLog({ok:false,error:'Clipboard not available'});}return;}
+  if(cp){
+    try{
+      const decoded = decodeURIComponent(cp.dataset.payload);
+      const parsed = JSON.parse(decoded);
+      await navigator.clipboard.writeText(JSON.stringify(parsed, null, 2));
+      setLog({ok:true,msg:'Payload copied to clipboard'});
+    }catch(innerErr){
+      setLog({ok:false,error:'Failed to copy payload: '+innerErr.message});
+    }
+    return;}
   const testPub=e.target.closest('.hubDraftTestPublish');
   if(testPub){
     try{const d=await api(`/api/hub-listing-drafts/${encodeURIComponent(testPub.dataset.id)}/test-publish-payload`,{method:'POST',body:'{}'});setLog(d);}catch(err){setLog(err.body||err.message);}
