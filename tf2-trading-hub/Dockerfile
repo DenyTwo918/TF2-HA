@@ -1,11 +1,11 @@
-ARG BUILD_ARCH=amd64
+﻿ARG BUILD_ARCH=amd64
 FROM ghcr.io/home-assistant/${BUILD_ARCH}-base:latest
 
-ARG BUILD_VERSION=5.14.0
+ARG BUILD_VERSION=5.14.1
 ARG BUILD_ARCH=amd64
 
 LABEL io.hass.name="TF2 Trading Hub" \
-      io.hass.description="TF2 trading bot for Home Assistant — trade review, backpack.tf listings, Steam integration." \
+      io.hass.description="TF2 trading bot for Home Assistant â€” trade review, backpack.tf listings, Steam integration." \
       io.hass.type="addon" \
       io.hass.version="${BUILD_VERSION}" \
       maintainer="DenyTwo918" \
