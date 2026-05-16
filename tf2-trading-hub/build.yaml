@@ -1,4 +1,4 @@
-﻿# Legacy file kept only for older Supervisor versions. Current Home Assistant Supervisor builds from Dockerfile directly.
+# Legacy file kept only for older Supervisor versions. Current Home Assistant Supervisor builds from Dockerfile directly.
 build_from:
   amd64: ghcr.io/home-assistant/amd64-base:latest
   aarch64: ghcr.io/home-assistant/aarch64-base:latest
