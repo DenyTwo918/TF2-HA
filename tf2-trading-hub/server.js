@@ -10,7 +10,7 @@ const SteamCommunity = require('steamcommunity');
 const TradeOfferManager = require('steam-tradeoffer-manager');
 const SteamTotp = require('steam-totp');
 
-const VERSION = '1.7.0';
+const VERSION = '1.7.1';
 const PORT = Number(process.env.PORT || 8099);
 const HOST = '0.0.0.0';
 const DATA_DIR = process.env.DATA_DIR || '/data';
@@ -177,6 +177,25 @@ const appState = {
   listings_count: null,
   last_sync: null,
 };
+
+// ─── Concurrency Guard ──────────────────────────────────────────────────────
+// Prevents overlapping Backpack.tf API operations from competing for the same
+// rate-limit quota.  Sniping operations (snipeClassifieds, snipeBuyOrders) skip
+// their cycle if a full sync is in progress.
+let isSyncing = false;
+
+async function guardedSync(fn, name) {
+  if (isSyncing) {
+    console.log(`[tf2-hub] ${name}: skipped — sync in progress`);
+    return;
+  }
+  isSyncing = true;
+  try {
+    await fn();
+  } finally {
+    isSyncing = false;
+  }
+}
 
 // Reset daily counters at midnight
 function scheduleDailyReset() {
@@ -440,7 +459,7 @@ async function getBuyMarketRef(name) {
 //   untrusted  cheapSell<highBuy outlier with no recovery, OR sources disagree >60%
 //              → NEVER buy or accept offers for untrusted items
 const marketSnapshotCache = new Map(); // name -> { snap, ts }
-const MARKET_SNAPSHOT_TTL = 10 * 60 * 1000;
+const MARKET_SNAPSHOT_TTL = 15 * 60 * 1000;
 
 async function fetchSellListings(name, token, count = 5) {
   try {
@@ -746,7 +765,7 @@ client.on('webSession', (sessionID, cookies) => {
       console.log('[tf2-hub] auto-confirmation active');
     }
     console.log('[tf2-hub] trade manager ready');
-    syncInventoryListings().catch(e => console.error('[tf2-hub] init listings error:', e.message));
+    guardedSync(syncInventoryListings, 'init-listings').catch(e => console.error('[tf2-hub] init listings error:', e.message));
   });
 });
 
@@ -1102,7 +1121,7 @@ async function evaluateOffer(offer) {
       if (err) console.error('[tf2-hub] accept error:', err.message);
       else {
         console.log('[tf2-hub] offer', offer.id, 'accepted');
-        setTimeout(() => syncInventoryListings().catch(() => {}), 15000);
+        setTimeout(() => guardedSync(syncInventoryListings, 'post-accept').catch(() => {}), 15000);
       }
     });
   } else if (action === 'counter') {
@@ -1468,6 +1487,15 @@ async function syncInventoryListings() {
     const maxTradeRef = maxTradeKeys > 0 ? maxTradeKeys * keyPriceRef : Infinity;
     const whitelist = new Set(configParsed.map(e => e.name)); // explicit buy_items bypass the cap
     let buyListingCount = 0;
+
+    // Pre-warm market snapshots for all buy items before the buy loop to avoid
+    // sequential cache-miss API calls (each item would otherwise make 2 fresh calls).
+    console.log(`[tf2-hub] pre-warming market snapshots for ${buyItemsParsed.length} buy items...`);
+    for (const { name } of buyItemsParsed) {
+      await getMarketSnapshot(name, apiToken);
+    }
+    console.log('[tf2-hub] market snapshot pre-warm complete');
+
     for (const { name, stock: itemMaxStock } of buyItemsParsed) {
       if (buyListingCount >= maxAutoBuy) break;
       if ((stockCount[name] || 0) >= itemMaxStock) continue; // at stock limit
@@ -1622,7 +1650,7 @@ manager.on('sentOfferChanged', (offer) => {
   }
   if (offer.state === 3) { // Accepted — inventory changed, re-post listings
     console.log('[tf2-hub] sent offer', offer.id, 'accepted — scheduling listing refresh');
-    setTimeout(() => syncInventoryListings().catch(() => {}), 15000);
+    setTimeout(() => guardedSync(syncInventoryListings, 'sent-offer-accepted').catch(() => {}), 15000);
   }
 });
 
@@ -2080,7 +2108,7 @@ server.listen(PORT, HOST, () => {
 
   fs.mkdirSync(DATA_DIR, { recursive: true });
 
-  fetchKeyPrice().then(syncListings).catch(() => {});
+  fetchKeyPrice().catch(() => {});
   login();
   scheduleDailyReset();
 
@@ -2088,10 +2116,10 @@ server.listen(PORT, HOST, () => {
   const syncMs = Math.max(5, Number(opts.sync_interval_minutes) || 15) * 60 * 1000;
   setInterval(syncListings, syncMs);
   setInterval(fetchKeyPrice, 6 * 60 * 60 * 1000);
-  setInterval(() => syncInventoryListings().catch(() => {}), 15 * 60 * 1000); // every 15min = auto-bump
-  setInterval(() => snipeClassifieds().catch(() => {}), 90 * 1000);
-  setInterval(() => snipeBuyOrders().catch(() => {}), 5 * 60 * 1000); // sell to buy-order bots every 5min
-  setTimeout(() => snipeBuyOrders().catch(() => {}), 60 * 1000); // first run 60s after startup (let login settle)
+  setInterval(() => guardedSync(syncInventoryListings, 'auto-bump').catch(() => {}), 15 * 60 * 1000); // every 15min = auto-bump
+  setInterval(() => guardedSync(snipeClassifieds, 'snipe-classifieds').catch(() => {}), 90 * 1000);
+  setInterval(() => guardedSync(snipeBuyOrders, 'snipe-buy-orders').catch(() => {}), 5 * 60 * 1000); // sell to buy-order bots every 5min
+  setTimeout(() => guardedSync(snipeBuyOrders, 'snipe-buy-orders-first').catch(() => {}), 60 * 1000); // first run 60s after startup (let login settle)
 
   // Auto-cancel pending offers older than 30 minutes
   setInterval(() => {
