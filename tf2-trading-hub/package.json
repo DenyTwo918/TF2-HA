@@ -1,6 +1,6 @@
 {
   "name": "tf2-trading-hub-addon",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "description": "TF2 Trading Hub — autonomous single-account trading bot for Home Assistant",
   "private": true,
   "main": "server.js",
