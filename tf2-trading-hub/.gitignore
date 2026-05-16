@@ -1,0 +1,18 @@
+# Local / generated files
+node_modules/
+tmpdata/
+data/
+work*/
+fix*/
+*.zip
+*.log
+.env
+.env.*
+.DS_Store
+Thumbs.db
+
+# Python/cache/editor noise
+__pycache__/
+*.pyc
+.vscode/
+.idea/

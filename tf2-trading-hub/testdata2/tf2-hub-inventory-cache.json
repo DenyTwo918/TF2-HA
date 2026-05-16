@@ -1,0 +1,5 @@
+{
+  "ok": false,
+  "stage": "steamid_missing",
+  "error": "SteamID64 is missing. Save the main account SteamID64 in Accounts first."
+}

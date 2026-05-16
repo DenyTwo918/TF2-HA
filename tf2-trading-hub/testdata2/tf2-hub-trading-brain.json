@@ -1,0 +1,183 @@
+{
+  "ok": true,
+  "version": "5.13.32",
+  "built_at": "2026-05-03T19:05:28.872Z",
+  "source": "scheduled_pipeline",
+  "mode": "observe",
+  "active_account_id": "main",
+  "accounts": {
+    "total": 1,
+    "enabled": 1,
+    "main": 1,
+    "trade": 0,
+    "storage": 0,
+    "flip": 0,
+    "buffer": 0,
+    "disabled": 0
+  },
+  "credential_status": {
+    "active_account_id": "main",
+    "accounts": [
+      {
+        "id": "main",
+        "label": "Main account",
+        "role": "main",
+        "credentials": {
+          "steam_id64": false,
+          "steam": false,
+          "backpack": false,
+          "secrets_returned": false
+        },
+        "readiness": "needs_setup"
+      }
+    ]
+  },
+  "inventory": {
+    "synced": false,
+    "status": "steamid_missing",
+    "items": 0,
+    "tradable": 0,
+    "priced": 0,
+    "unpriced": 0,
+    "estimated_value_ref": 0,
+    "error": "SteamID64 is missing. Save the main account SteamID64 in Accounts first.",
+    "diagnostics": [],
+    "guidance": [
+      "Run Sync inventory after SteamID64 is saved."
+    ]
+  },
+  "market": {
+    "prices_seen": 0,
+    "candidates": 0,
+    "watchlist": 0,
+    "scanner_mode": "balanced"
+  },
+  "backpack": {
+    "own_listings": 0,
+    "prices_ok": false,
+    "cache_stage": "sync_failed"
+  },
+  "offers": {
+    "decisions": 0,
+    "accept_recommended": 0,
+    "needs_review": 0,
+    "reject_recommended": 0,
+    "ignored": 0,
+    "idle": true
+  },
+  "listings": {
+    "planned_actions": 0
+  },
+  "actionable_plan": {
+    "ok": false,
+    "actions": 0,
+    "watchlist": 0,
+    "protected_currency_items": 0
+  },
+  "transfers": {
+    "planned": 0
+  },
+  "execution_queue": {
+    "pending": 0
+  },
+  "recommendations": [
+    {
+      "id": "prices_ready",
+      "severity": "success",
+      "category": "backpack",
+      "title": "Backpack.tf prices ready",
+      "message": "0 price entries are available.",
+      "action": "none"
+    },
+    {
+      "id": "own_listings_empty",
+      "severity": "info",
+      "category": "backpack",
+      "title": "No own listings yet",
+      "message": "This is normal if the account has not posted Backpack.tf listings.",
+      "action": "none"
+    },
+    {
+      "id": "scanner_empty",
+      "severity": "info",
+      "category": "market",
+      "title": "No trade candidates yet",
+      "message": "Backpack.tf prices are synced, but current scanner filters produced no trade candidates. Build a relaxed/watchlist view.",
+      "action": "build_scanner_relaxed"
+    },
+    {
+      "id": "offers_idle",
+      "severity": "info",
+      "category": "offers",
+      "title": "No active trade offers",
+      "message": "Decision queue is idle. Autopilot will keep checking.",
+      "action": "none"
+    },
+    {
+      "id": "sda_optional",
+      "severity": "info",
+      "category": "sda",
+      "title": "SDA Bridge is optional now",
+      "message": "In manual/observe/plan mode, SDA Bridge is only needed when you explicitly confirm known trade offers.",
+      "action": "none"
+    }
+  ],
+  "next_actions": [
+    {
+      "id": "next_sync_inventory",
+      "type": "sync",
+      "label": "Sync Steam inventory",
+      "safe": true,
+      "live": false,
+      "requires_confirmation": false,
+      "action": "sync_inventory"
+    },
+    {
+      "id": "next_build_watchlist",
+      "type": "plan",
+      "label": "Build relaxed market watchlist",
+      "safe": true,
+      "live": false,
+      "requires_confirmation": false,
+      "action": "build_scanner_relaxed"
+    }
+  ],
+  "warnings": [
+    {
+      "id": "steam_api_missing",
+      "category": "credentials",
+      "title": "Steam API key missing",
+      "message": "Trade offer review needs a Steam Web API key saved in the UI credential vault."
+    },
+    {
+      "id": "backpack_token_missing",
+      "category": "credentials",
+      "title": "Backpack.tf token/API key missing",
+      "message": "Backpack.tf pricing and listings need a saved provider token or API key."
+    },
+    {
+      "id": "inventory_failed",
+      "category": "inventory",
+      "title": "Inventory sync needs attention",
+      "message": "SteamID64 is missing. Save the main account SteamID64 in Accounts first.",
+      "guidance": [
+        "Run Sync inventory after SteamID64 is saved."
+      ]
+    }
+  ],
+  "blocked": [
+    {
+      "id": "main_steamid_missing",
+      "category": "account",
+      "title": "Main SteamID64 missing",
+      "message": "Save the main account SteamID64 before inventory and offer review can work."
+    }
+  ],
+  "safety": {
+    "live_trade_accepts": false,
+    "live_backpack_writes": false,
+    "live_confirmations": false,
+    "default_safe": true,
+    "secrets_returned": false
+  }
+}

@@ -1,0 +1,224 @@
+{
+  "ok": true,
+  "version": "5.13.32",
+  "updated_at": "2026-05-03T19:05:28.767Z",
+  "scope": "main_account_first_multi_account_ready",
+  "active_account_id": "main",
+  "main_account": {
+    "id": "main",
+    "role": "main",
+    "role_label": "Main",
+    "role_description": "Primary account. Trades, stores, lists, scans and owns the main cockpit workflow.",
+    "capabilities": {
+      "can_trade": true,
+      "can_store": true,
+      "can_list": true,
+      "can_confirm": true,
+      "can_scan": true
+    },
+    "label": "Main account",
+    "steam_id64": "",
+    "enabled": true,
+    "primary": true,
+    "backpack_tf_token_saved": false,
+    "steam_api_key_saved": false,
+    "limits": {
+      "max_offer_value_ref": 100,
+      "daily_value_ref": 0,
+      "max_actions_per_day": 5,
+      "max_ref_per_action": 2,
+      "min_profit_ref": 0.11,
+      "risk_tolerance": 25
+    },
+    "notes": "",
+    "credential_source": "ui_vault",
+    "readiness": "needs_setup",
+    "active_for_autopilot": true,
+    "role_locked": true
+  },
+  "subaccounts_enabled": false,
+  "subaccounts_prepared": 0,
+  "readiness": {
+    "ok": true,
+    "version": "5.13.32",
+    "updated_at": "2026-05-03T19:05:28.774Z",
+    "readiness_percent": 22,
+    "ready_count": 2,
+    "total_steps": 9,
+    "main_account": {
+      "id": "main",
+      "role": "main",
+      "role_label": "Main",
+      "role_description": "Primary account. Trades, stores, lists, scans and owns the main cockpit workflow.",
+      "capabilities": {
+        "can_trade": true,
+        "can_store": true,
+        "can_list": true,
+        "can_confirm": true,
+        "can_scan": true
+      },
+      "label": "Main account",
+      "steam_id64": "",
+      "enabled": true,
+      "primary": true,
+      "backpack_tf_token_saved": false,
+      "steam_api_key_saved": false,
+      "limits": {
+        "max_offer_value_ref": 100,
+        "daily_value_ref": 0,
+        "max_actions_per_day": 5,
+        "max_ref_per_action": 2,
+        "min_profit_ref": 0.11,
+        "risk_tolerance": 25
+      },
+      "notes": "",
+      "credential_source": "ui_vault",
+      "readiness": "needs_setup",
+      "active_for_autopilot": true,
+      "role_locked": true
+    },
+    "account_model": {
+      "mode": "main_only",
+      "active_account_id": "main",
+      "main_account_id": "main",
+      "multi_account_enabled": false,
+      "future_subaccounts_supported": true,
+      "subaccounts_prepared": 0
+    },
+    "steps": [
+      {
+        "id": "main_account",
+        "label": "Main account profile",
+        "ready": false,
+        "status": "missing",
+        "detail": "Main account SteamID64 is not set.",
+        "action": "Save SteamID64 in the Trade Hub UI."
+      },
+      {
+        "id": "steam_api_key",
+        "label": "Steam Web API key",
+        "ready": false,
+        "status": "missing",
+        "detail": "Needed to fetch trade offers.",
+        "action": "Save Steam Web API key in the Trade Hub UI."
+      },
+      {
+        "id": "backpack_token",
+        "label": "Backpack.tf token/API key",
+        "ready": false,
+        "status": "missing",
+        "detail": "Needed for live Backpack.tf provider requests.",
+        "action": "Save Backpack.tf token/API key in the Trade Hub UI."
+      },
+      {
+        "id": "provider_cache",
+        "label": "Provider cache",
+        "ready": false,
+        "status": "missing",
+        "detail": "No provider cache yet.",
+        "action": "Run Sync Backpack.tf."
+      },
+      {
+        "id": "inventory_cache",
+        "label": "Inventory cache",
+        "ready": false,
+        "status": "missing",
+        "detail": "Inventory not synced yet.",
+        "action": "Run autopilot or Sync inventory."
+      },
+      {
+        "id": "pricing_core",
+        "label": "Pricing report",
+        "ready": false,
+        "status": "missing",
+        "detail": "No pricing report yet.",
+        "action": "Run trade review."
+      },
+      {
+        "id": "decision_queue",
+        "label": "Decision queue",
+        "ready": true,
+        "status": "ready",
+        "detail": "0 decisions. Empty is OK when no offers are active.",
+        "action": "Autopilot or Run trade review will refresh this."
+      },
+      {
+        "id": "sda_bridge",
+        "label": "SDA Bridge helper",
+        "ready": true,
+        "status": "ready",
+        "detail": "Optional while Trade Hub is in manual mode.",
+        "action": "Open TF2 SDA Bridge before auto-confirm mode."
+      },
+      {
+        "id": "planning",
+        "label": "Planning output",
+        "ready": false,
+        "status": "missing",
+        "detail": "Planning is idle until offers or scanner targets exist.",
+        "action": "Let autopilot run or build the market scanner."
+      }
+    ],
+    "can_run_manual_review": false,
+    "can_sync_backpack": false,
+    "can_build_trading_core": false,
+    "recommended_next_action": "Save SteamID64 in the Trade Hub UI."
+  },
+  "backpack": {
+    "enabled": true,
+    "token_saved": false,
+    "cached_listings": 0,
+    "cache_updated_at": "2026-05-03T19:05:28.571Z",
+    "write_mode": "guarded",
+    "live_writes_enabled": false
+  },
+  "market_scanner": {
+    "ready": false,
+    "candidates": 0,
+    "updated_at": "2026-05-03T19:05:28.673Z",
+    "mode": "not_built"
+  },
+  "inventory": {
+    "ready": false,
+    "items": 0,
+    "priced_items": 0,
+    "estimated_value_ref": 0,
+    "top_value_items": []
+  },
+  "offers": {
+    "total": 0,
+    "accept_recommended": 0,
+    "needs_review": 0,
+    "reject_recommended": 0,
+    "estimated_profit_ref": 0,
+    "top_accepts": []
+  },
+  "listings": {
+    "plan_ready": false,
+    "planned_actions": 0,
+    "top_actions": []
+  },
+  "targeted_orders": {
+    "ready": false,
+    "count": 0,
+    "selected_value_ref": 0
+  },
+  "safety": {
+    "trade_approval_mode": "manual",
+    "global_live_writes_enabled": false,
+    "auto_accept_enabled": false,
+    "sda_bridge_enabled": true,
+    "sda_auto_confirm": false,
+    "trade_only_confirmations_expected": true
+  },
+  "next_actions": [
+    "Set main account SteamID64.",
+    "Add Steam Web API key to read trade offers.",
+    "Add Backpack.tf token/API key for classifieds and provider pricing.",
+    "Run Sync Backpack.tf to build classifieds cache.",
+    "Sync Steam inventory to show owned items and estimated backpack value.",
+    "Run trade review to create decision queue.",
+    "Run review to generate pricing report.",
+    "Build listing plan from review results."
+  ]
+}

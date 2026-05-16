@@ -1,0 +1,19 @@
+{
+  "version": "5.13.68",
+  "patch": "HA Ingress API Route Repair",
+  "addon": "tf2-trading-hub",
+  "fixed": [
+    "Frontend API helper now keeps requests inside the current HA ingress base path.",
+    "SSE event stream uses the same API URL resolver.",
+    "Static middleware remains after API routes so API endpoints win over static serving.",
+    "Added /api/debug/routes route inspector.",
+    "Added JSON /api 404 fallback with version and route list.",
+    "Synced dist/server.js and dist/index.js.",
+    "Bumped all relevant Home Assistant/Docker/UI/runtime versions to 5.13.68."
+  ],
+  "verify": [
+    "Open /api/version-audit after update and confirm 5.13.68.",
+    "Open /api/debug/routes and confirm /api/accounts and /api/settings exist.",
+    "Use HA add-on store Check for updates, rebuild/install 5.13.68, then hard refresh dashboard."
+  ]
+}
