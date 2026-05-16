@@ -1,7 +1,7 @@
 ARG BUILD_ARCH=aarch64
 FROM ghcr.io/home-assistant/${BUILD_ARCH}-base:latest
 
-ARG BUILD_VERSION=1.7.3
+ARG BUILD_VERSION=1.7.4
 
 LABEL io.hass.name="TF2 Trading Hub" \
       io.hass.description="Autonomous TF2 trading bot for Home Assistant." \
